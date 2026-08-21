@@ -1,50 +1,150 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+===================
+Version change: (none, template) → 1.0.0
+Rationale: Initial ratification. No prior filled constitution existed (file still
+held unresolved template placeholders), so this is treated as the first adoption
+rather than an amendment.
+
+Modified principles: n/a (first version)
+
+Added sections:
+- Core Principles: I. Code Quality, II. Testing Standards, III. UX Consistency,
+  IV. Performance (four principles, matching the four focus areas requested at
+  ratification time — no fifth principle was added to avoid diluting focus)
+- Architecture & Technology Constraints
+- Development Workflow & Quality Gates
+- Governance
+
+Removed sections: n/a (first version)
+
+Templates requiring updates:
+- .specify/templates/plan-template.md — ⚠ pending manual check: Constitution
+  Check section should be reviewed against the four principles above next time
+  /speckit-plan runs for a feature.
+- .specify/templates/spec-template.md — ✅ no constitution-specific references
+- .specify/templates/tasks-template.md — ✅ no constitution-specific references
+- .specify/templates/checklist-template.md — ✅ no constitution-specific references
+
+Follow-up TODOs:
+- TODO(TECH_STACK): No implementation code or dependency manifests exist yet in
+  this repository, so principles are written technology-agnostic. Revisit
+  Architecture & Technology Constraints once the concrete stack (message
+  broker, backend framework, frontend framework) is chosen, likely during the
+  first /speckit-plan run.
+-->
+
+# Event-Driven Ticket Marketplace Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Code Quality
+All code merged into a shared branch MUST pass automated linting and static
+analysis, and MUST be reviewed by at least one person other than the author
+before merge. No direct pushes to the main branch are permitted. Every module,
+service, and event handler MUST have a single, clearly named responsibility;
+duplication is preferred over premature or speculative abstraction, and
+abstractions MUST be justified by an existing, demonstrated need rather than a
+hypothetical future one. Public interfaces (APIs, event schemas, shared
+modules) MUST be documented at the point of definition, not in a separate,
+easily-stale document.
+Rationale: In an event-driven system, components are loosely coupled and often
+owned or touched by different contributors over time; consistent, reviewed,
+low-complexity code is what keeps that coupling manageable and keeps defects
+from propagating silently across service boundaries.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. Testing Standards
+Every unit of business logic MUST have automated unit tests, and every event
+producer/consumer pair MUST have an integration test that exercises the
+published event contract, not just the handler in isolation. Flows involving
+concurrent state changes — most importantly ticket reservation, purchase, and
+inventory decrement — MUST have tests that specifically exercise concurrent or
+out-of-order execution, since these are the scenarios most likely to cause
+real-world defects (double-booking, oversold inventory) in a ticket
+marketplace. Tests MUST fail before the corresponding fix or feature is
+implemented and pass afterward; a change that cannot demonstrate this is not
+considered verified. CI MUST run the full automated test suite on every pull
+request, and a failing suite MUST block merge.
+Rationale: Event-driven, concurrent flows fail in ways that manual testing and
+casual review reliably miss (race conditions, replayed or out-of-order
+events, duplicate delivery); automated tests targeted at those failure modes
+are the only reliable safety net.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. UX Consistency
+User-facing surfaces (buyer flows, seller/organizer flows, checkout, and any
+admin tooling) MUST share a single set of interaction patterns, components,
+and terminology rather than each screen inventing its own. Every
+asynchronous or event-driven UI update (e.g., ticket availability changing,
+order status changing) MUST have a defined and consistent loading, success,
+and error/failure state — a user MUST never be left looking at a screen that
+gives no indication of what happened to their action. Interfaces MUST meet
+WCAG 2.1 AA accessibility standards at minimum. Any deviation from an
+established pattern MUST be justified in the relevant spec or plan, not
+introduced silently during implementation.
+Rationale: A ticket marketplace is trust-sensitive — buyers are spending money
+against inventory that can change state at any moment due to other users'
+actions. Inconsistent or ambiguous feedback erodes trust and causes support
+burden and lost sales far more than in a typical CRUD application.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. Performance
+Critical user-facing paths — search, event/listing browse, and checkout —
+MUST have an explicit latency budget defined in the relevant feature's plan,
+and that budget MUST be validated with load testing before a feature that
+touches those paths ships. Event handlers and consumers MUST NOT perform
+blocking, unbounded-latency operations (e.g., synchronous third-party calls
+without a timeout) inline in the critical event-processing path; such work
+MUST be offloaded or made asynchronous with a bounded timeout. Any feature
+expected to be exposed to a high-demand spike (e.g., a popular on-sale event)
+MUST include a load/soak test scenario simulating that spike before release.
+Rationale: Ticket on-sales are inherently bursty — demand can spike far above
+steady-state within seconds — and an event-driven backend that cannot absorb
+and process that burst within budget directly translates into failed
+purchases and reputational damage.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+## Architecture & Technology Constraints
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+The concrete technology stack (message broker, backend framework, frontend
+framework, datastores) is not yet fixed as of this version, since the
+repository currently contains no implementation code. Once chosen, the stack
+MUST be recorded here or in a linked architecture document, and the following
+constraints apply regardless of the specific technology selected:
+- State-changing operations that affect shared inventory (e.g., ticket
+  availability) MUST go through a single authoritative source of truth;
+  events are a notification/propagation mechanism, not a substitute for
+  authoritative state.
+- Event schemas MUST be versioned, and a breaking change to an existing event
+  schema MUST NOT be deployed without a compatibility plan (dual-publish,
+  consumer migration, or equivalent).
+- Secrets and credentials MUST NOT be committed to the repository; this
+  applies to configuration for message brokers, databases, and any
+  third-party integration.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+## Development Workflow & Quality Gates
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
-
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+- Every feature MUST go through the spec → plan → tasks → implement workflow
+  before code is written, except for trivial fixes (typos, dependency bumps,
+  non-behavioral refactors) which may be handled directly.
+- Pull requests MUST link the spec or issue they implement and MUST pass
+  linting, the automated test suite, and at least one human review before
+  merge.
+- A pull request that introduces a new event type, changes an existing event
+  schema, or changes a checkout/reservation flow MUST call out that fact
+  explicitly in its description so reviewers apply the relevant Testing
+  Standards and Performance checks above.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes any conflicting team convention or prior
+informal practice. Amendments are made by editing this file via the
+`/speckit-constitution` workflow (or an equivalent reviewed pull request),
+and MUST include an updated Sync Impact Report describing what changed and
+why. Versioning follows semantic versioning: MAJOR for backward-incompatible
+principle removals or redefinitions, MINOR for new principles or materially
+expanded guidance, PATCH for wording/clarification fixes that do not change
+meaning. Every pull request and every `/speckit-plan` run MUST verify its
+approach against the Core Principles above; unjustified deviation is grounds
+for requesting changes in review. Complexity that conflicts with a principle
+(e.g., an added abstraction, a skipped test category) MUST be explicitly
+justified in the plan or PR description rather than silently introduced.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2026-08-22 | **Last Amended**: 2026-08-22
