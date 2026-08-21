@@ -1,27 +1,23 @@
 <!--
 Sync Impact Report
 ===================
-Version change: (none, template) → 1.0.0
-Rationale: Initial ratification. No prior filled constitution existed (file still
-held unresolved template placeholders), so this is treated as the first adoption
-rather than an amendment.
+Version change: 1.0.0 → 1.1.0
+Rationale: MINOR bump — added a new, materially significant Core Principle
+governing when an AI coding assistant must defer tooling/environment/credential
+actions to the human developer instead of performing them autonomously. No
+existing principle was redefined or removed.
 
-Modified principles: n/a (first version)
+Modified principles: n/a (no renames or redefinitions)
 
 Added sections:
-- Core Principles: I. Code Quality, II. Testing Standards, III. UX Consistency,
-  IV. Performance (four principles, matching the four focus areas requested at
-  ratification time — no fifth principle was added to avoid diluting focus)
-- Architecture & Technology Constraints
-- Development Workflow & Quality Gates
-- Governance
+- Core Principles: V. Human-Gated Tooling & Environment Changes
 
-Removed sections: n/a (first version)
+Removed sections: n/a
 
 Templates requiring updates:
 - .specify/templates/plan-template.md — ⚠ pending manual check: Constitution
-  Check section should be reviewed against the four principles above next time
-  /speckit-plan runs for a feature.
+  Check section should be reviewed against all five principles (including the
+  new Principle V) next time /speckit-plan runs for a feature.
 - .specify/templates/spec-template.md — ✅ no constitution-specific references
 - .specify/templates/tasks-template.md — ✅ no constitution-specific references
 - .specify/templates/checklist-template.md — ✅ no constitution-specific references
@@ -31,7 +27,7 @@ Follow-up TODOs:
   this repository, so principles are written technology-agnostic. Revisit
   Architecture & Technology Constraints once the concrete stack (message
   broker, backend framework, frontend framework) is chosen, likely during the
-  first /speckit-plan run.
+  first /speckit-plan run. (Carried over from v1.0.0, still unresolved.)
 -->
 
 # Event-Driven Ticket Marketplace Constitution
@@ -101,6 +97,28 @@ steady-state within seconds — and an event-driven backend that cannot absorb
 and process that burst within budget directly translates into failed
 purchases and reputational damage.
 
+### V. Human-Gated Tooling & Environment Changes
+An AI coding assistant working in this repository MUST NOT autonomously
+install a new tool, dependency, or runtime (e.g., Docker, a JDK/Maven via
+start.spring.io, a package manager, a CLI); MUST NOT autonomously obtain,
+generate, or configure credentials or secrets (API keys, tokens, service
+accounts); and MUST NOT autonomously run shell commands that provision or
+change environment/infrastructure state that did not already exist (e.g.,
+`docker run`, `brew install`, cloud CLI provisioning commands). Instead, the
+assistant MUST stop, briefly explain what is needed and why, and give the
+user clear, step-by-step instructions they can run themselves. This
+principle applies only to first-time installation, provisioning, and
+credentialing actions; it does NOT apply to invoking a tool that is already
+installed and configured (e.g., running `mvn test` once Maven is already on
+the system, or `docker compose up` once Docker and the compose file already
+exist).
+Rationale: Installing tools, provisioning infrastructure, and creating or
+using credentials have effects that reach beyond the repository — system
+state, account access, billing, and secrets — and are hard to review or
+reverse from within a code diff. The user MUST retain full visibility into,
+and control over, what gets installed on their machine and what credentials
+get created or used on their behalf.
+
 ## Architecture & Technology Constraints
 
 The concrete technology stack (message broker, backend framework, frontend
@@ -147,4 +165,4 @@ for requesting changes in review. Complexity that conflicts with a principle
 (e.g., an added abstraction, a skipped test category) MUST be explicitly
 justified in the plan or PR description rather than silently introduced.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-22 | **Last Amended**: 2026-08-22
+**Version**: 1.1.0 | **Ratified**: 2026-08-22 | **Last Amended**: 2026-08-22
