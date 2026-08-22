@@ -80,7 +80,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T020 [P] [US1] Create `SeatsReserved.java` — envelope plus `orderId`, `seatIds`, `reservationId`, `lockExpiresAt`; compact constructor additionally asserting `lockExpiresAt` is strictly after `occurredAt`. WHY comment explaining the fencing purpose (FR-008)
 - [x] T021 [P] [US1] Create `SeatsRejected.java` — envelope plus `orderId`, `seatIds`, `reason`
 - [x] T022 [P] [US1] Create `PaymentSucceeded.java` — envelope plus `orderId`, `paymentId`, `amount`
-- [ ] T023 [P] [US1] Create `PaymentFailed.java` — envelope plus `orderId`, `reason`
+- [x] T023 [P] [US1] Create `PaymentFailed.java` — envelope plus `orderId`, `reason`
 - [ ] T024 [P] [US1] Create `OrderConfirmed.java` — envelope plus `orderId`, `seatIds`
 - [ ] T025 [P] [US1] Create `OrderCancelled.java` — envelope plus `orderId`, `reason`
 - [ ] T026 [US1] Wire the seven records into the `SagaEvent` permits clause and confirm the sealed hierarchy compiles
