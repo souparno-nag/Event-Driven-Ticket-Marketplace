@@ -1,0 +1,32 @@
+# Prometheus scrape configuration.
+#
+# Deliberately minimal: no service targets exist yet. The first Spring Boot service arrives in build
+# step 2 and the scrape jobs are added in step 8, when /actuator/prometheus endpoints exist to point
+# at. A job listing targets that are not running would leave Prometheus permanently reporting them
+# as down, which trains you to ignore a red dashboard — the opposite of what monitoring is for.
+
+global:
+  # How often to collect. 15s is Prometheus's own default and a sensible balance: frequent enough to
+  # see a spike during the step-9 load test, infrequent enough not to be a load source itself.
+  scrape_interval: 15s
+  # How long a single scrape may take before it is abandoned. Must stay below scrape_interval, or
+  # slow scrapes would overlap and queue.
+  scrape_timeout: 10s
+  # Only relevant once alerting rules exist; stated now so the file has one obvious place to grow.
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus scraping itself. Not filler: it is the simplest possible proof the scrape loop works,
+  # so a dashboard showing this target UP means the pipeline is sound and any other target being
+  # down is that target's problem.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Service jobs arrive in build step 8, and will look like this:
+  #
+  #   - job_name: order-service
+  #     metrics_path: /actuator/prometheus
+  #     static_configs:
+  #       - targets: ["host.docker.internal:8081"]   # host.docker.internal, NOT localhost:
+  #                                                  # localhost inside this container is Prometheus
