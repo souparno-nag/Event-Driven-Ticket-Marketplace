@@ -1,0 +1,113 @@
+# Local backing components for the ticket marketplace.
+#
+# Services are tagged with Compose profiles so a developer runs only what the current build step
+# needs (R11). The active set comes from COMPOSE_PROFILES in infra/.env:
+#
+#   core  Kafka + PostgreSQL + Redis            ~1.1 GiB   build steps 1-5
+#   obs   Zipkin + Prometheus                   ~0.5 GiB   build step 8
+#   full  everything                            ~3   GiB   build step 6 onward
+#
+# Every service declares a hard mem_limit. Their real purpose is failure isolation: without one, a
+# container that grows drags the whole host into swap and everything degrades together with no
+# signal saying which one caused it. With one, that container is OOM-killed (exit code 137) and
+# every other component keeps serving. A loud attributable failure beats a slow global one (R10).
+
+name: ticket-marketplace
+
+services:
+
+  # ---------------------------------------------------------------------------------------------
+  # Kafka — the message broker every saga message travels through.
+  # ---------------------------------------------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: kafka
+    profiles: ["core", "full"]
+    ports:
+      # Only the host listener is published. The controller and inter-broker listeners stay inside
+      # the Compose network, where nothing outside needs to reach them.
+      - "9092:9092"
+    environment:
+      # --- KRaft: no ZooKeeper (FR-014) ------------------------------------------------------
+      # Combined mode runs the broker and the controller in one process. A production cluster
+      # separates them so controller quorum survives broker restarts; a single-node local broker
+      # has no quorum to protect, and the second process would cost another ~300 MiB (R7).
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # WHY the cluster id is hardcoded rather than generated: KRaft stamps it into the data
+      # directory on first start and refuses to start against a directory holding a different one.
+      # A generated id would make every restart a coin flip between "works" and a cryptic metadata
+      # mismatch, which is exactly what FR-015 and SC-005 measure. Fixed id plus `make down -v`
+      # gives a reproducible reset.
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+
+      # --- Listeners: the classic Kafka-in-Docker trap ----------------------------------------
+      # A client does not keep talking to the address it bootstrapped against. The broker replies
+      # with its ADVERTISED address and the client reconnects to that. So a single listener cannot
+      # serve both worlds: advertise `kafka:9092` and host processes cannot resolve it; advertise
+      # `localhost:9092` and containers resolve it to themselves.
+      #
+      # Two listeners solve it. Containers use INTERNAL (kafka:29092); processes on the host — the
+      # services run from an IDE in steps 2-7, and the Testcontainers tests — use HOST
+      # (localhost:9092). Same broker, two doors.
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # --- Single-broker settings --------------------------------------------------------------
+      # These internal topics default to replication factor 3 and would fail to create on one
+      # broker. TRADEOFF: replication factor 1 means no fault tolerance at all — a local
+      # constraint, not a production topology, and called out as such in the README (R6).
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      # Default is 3000ms, which makes every consumer group wait three seconds to form. Pointless
+      # on a single node and it slows every test run.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      # WHY auto-creation is off: a broker that creates topics on first reference creates them with
+      # DEFAULT settings — one partition. That silently defeats FR-027's three-partition
+      # requirement, and the failure is invisible: everything works, just without the concurrency
+      # the load test is supposed to prove. Channels are provisioned explicitly in T044.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+
+      # Both bounds are set deliberately. Since Java 10 the JVM reads its cgroup limit rather than
+      # host memory, but defaults the heap to only 25% of it — so this container would otherwise
+      # run a 192 MiB heap inside a 768 MiB limit and waste the rest. The heap also has to stay
+      # well below the limit, because metaspace, thread stacks, direct byte buffers, and GC
+      # structures all live outside it (R10).
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+
+    volumes:
+      # Named rather than a bind mount, so the data directory is owned by the image's user and does
+      # not depend on host uid mapping. `make down` removes it, which is what makes a reset clean.
+      - kafka-data:/var/lib/kafka/data
+
+    mem_limit: 768m
+    mem_reservation: 512m
+    # Equal to mem_limit, which forbids swapping entirely. On a machine whose swap is already
+    # exhausted, a container that fails fast is far more useful than one that crawls (R10).
+    memswap_limit: 768m
+
+    healthcheck:
+      # Readiness, not liveness (FR-012, R8). The process is listening long before it can serve
+      # metadata; this asks the broker to answer a real API request, which is what a client will
+      # need. Anything weaker — a port check, a `pgrep` — reports healthy while clients still fail.
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      # KRaft formats its storage on first start, so the first run is slower than later ones.
+      # start_period suppresses failures during that window rather than counting them toward
+      # retries, so a slow first boot does not mark the container unhealthy.
+      start_period: 30s
+
+volumes:
+  kafka-data:

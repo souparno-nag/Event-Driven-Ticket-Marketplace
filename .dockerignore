@@ -1,0 +1,27 @@
+# Keep image build contexts small and reproducible. Service Dockerfiles arrive from build step 2
+# onward and will build from the repository root, since a module needs the parent pom above it.
+
+# Build output — rebuilt inside the image, and copying it in risks shipping a stale jar
+target/
+**/target/
+*.class
+
+# Version control and IDE state
+.git/
+.gitignore
+.idea/
+*.iml
+.vscode/
+
+# Documentation and specifications: never needed at runtime, and they change constantly, which
+# would invalidate the Docker layer cache on every edit
+docs/
+specs/
+.specify/
+.claude/
+README.md
+
+# Local environment state
+infra/data/
+.env
+*.env
