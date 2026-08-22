@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://marketplace.local/schemas/order-created.schema.json",
+  "title": "OrderCreated",
+  "description": "A buyer requested seats. Opens the saga. Published by order-service from the transactional outbox.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "messageId": {
+      "$ref": "envelope.schema.json#/properties/messageId"
+    },
+    "sagaId": {
+      "$ref": "envelope.schema.json#/properties/sagaId"
+    },
+    "occurredAt": {
+      "$ref": "envelope.schema.json#/properties/occurredAt"
+    },
+    "schemaVersion": {
+      "$ref": "envelope.schema.json#/properties/schemaVersion"
+    },
+    "orderId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The order this message concerns. Always equal to sagaId."
+    },
+    "userId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "showId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The concert being ticketed. Distinct from messageId."
+    },
+    "seatIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z]+[0-9]+$"
+      },
+      "description": "Seat labels unique within the show, e.g. A12. Not globally unique."
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]{2}$",
+      "description": "Decimal string with exactly 2 places. A string, not a number, so it is never parsed as a lossy double."
+    }
+  },
+  "required": [
+    "messageId",
+    "sagaId",
+    "occurredAt",
+    "schemaVersion",
+    "orderId",
+    "userId",
+    "showId",
+    "seatIds",
+    "amount"
+  ]
+}

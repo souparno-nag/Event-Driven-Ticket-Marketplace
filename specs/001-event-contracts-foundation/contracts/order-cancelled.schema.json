@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://marketplace.local/schemas/order-cancelled.schema.json",
+  "title": "OrderCancelled",
+  "description": "The saga was compensated. Terminal, absorbing state. RESERVATION_EXPIRED covers a hold that lapsed mid-saga.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "messageId": {
+      "$ref": "envelope.schema.json#/properties/messageId"
+    },
+    "sagaId": {
+      "$ref": "envelope.schema.json#/properties/sagaId"
+    },
+    "occurredAt": {
+      "$ref": "envelope.schema.json#/properties/occurredAt"
+    },
+    "schemaVersion": {
+      "$ref": "envelope.schema.json#/properties/schemaVersion"
+    },
+    "orderId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The order this message concerns. Always equal to sagaId."
+    },
+    "reason": {
+      "enum": [
+        "PAYMENT_FAILED",
+        "SEATS_UNAVAILABLE",
+        "RESERVATION_EXPIRED"
+      ]
+    }
+  },
+  "required": [
+    "messageId",
+    "sagaId",
+    "occurredAt",
+    "schemaVersion",
+    "orderId",
+    "reason"
+  ]
+}

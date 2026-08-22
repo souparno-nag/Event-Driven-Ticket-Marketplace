@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://marketplace.local/schemas/envelope.schema.json",
+  "title": "Saga message envelope",
+  "description": "Fields present on every saga message. Repeated on each message type rather than nested, so a consumer reads a business field without unwrapping.",
+  "type": "object",
+  "properties": {
+    "messageId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identity of THIS message. The consumer idempotency key. Never reused, including on republish. Distinct from showId, which identifies a concert."
+    },
+    "sagaId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Correlates every message in one order's lifecycle. Always equal to orderId. Also the partition key, which is what guarantees per-order ordering."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the fact happened, not when it was published. UTC, ISO-8601."
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Starts at 1. Incremented only on a breaking change. A consumer meeting an unrecognised value routes the message to the .DLT channel without processing it."
+    }
+  },
+  "required": [
+    "messageId",
+    "sagaId",
+    "occurredAt",
+    "schemaVersion"
+  ]
+}

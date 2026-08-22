@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://marketplace.local/schemas/seats-reserved.schema.json",
+  "title": "SeatsReserved",
+  "description": "All requested seats were held. Reservation is all-or-nothing, so seatIds equals the requested set.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "messageId": {
+      "$ref": "envelope.schema.json#/properties/messageId"
+    },
+    "sagaId": {
+      "$ref": "envelope.schema.json#/properties/sagaId"
+    },
+    "occurredAt": {
+      "$ref": "envelope.schema.json#/properties/occurredAt"
+    },
+    "schemaVersion": {
+      "$ref": "envelope.schema.json#/properties/schemaVersion"
+    },
+    "orderId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The order this message concerns. Always equal to sagaId."
+    },
+    "seatIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z]+[0-9]+$"
+      },
+      "description": "Seat labels unique within the show, e.g. A12. Not globally unique."
+    },
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "lockExpiresAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the hold lapses. Strictly after occurredAt. The fencing field: a service confirming later compares this against now and compensates rather than confirming a seat someone else now holds."
+    }
+  },
+  "required": [
+    "messageId",
+    "sagaId",
+    "occurredAt",
+    "schemaVersion",
+    "orderId",
+    "seatIds",
+    "reservationId",
+    "lockExpiresAt"
+  ]
+}

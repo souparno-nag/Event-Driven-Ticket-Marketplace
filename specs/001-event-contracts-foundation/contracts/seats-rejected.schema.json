@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://marketplace.local/schemas/seats-rejected.schema.json",
+  "title": "SeatsRejected",
+  "description": "At least one requested seat could not be held, so none were. Triggers immediate cancellation.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "messageId": {
+      "$ref": "envelope.schema.json#/properties/messageId"
+    },
+    "sagaId": {
+      "$ref": "envelope.schema.json#/properties/sagaId"
+    },
+    "occurredAt": {
+      "$ref": "envelope.schema.json#/properties/occurredAt"
+    },
+    "schemaVersion": {
+      "$ref": "envelope.schema.json#/properties/schemaVersion"
+    },
+    "orderId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The order this message concerns. Always equal to sagaId."
+    },
+    "seatIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z]+[0-9]+$"
+      },
+      "description": "Seat labels unique within the show, e.g. A12. Not globally unique."
+    },
+    "reason": {
+      "enum": [
+        "SEATS_ALREADY_HELD",
+        "SEATS_NOT_FOUND",
+        "SHOW_NOT_FOUND"
+      ],
+      "description": "An enum, not prose, so compensating logic branches on cause."
+    }
+  },
+  "required": [
+    "messageId",
+    "sagaId",
+    "occurredAt",
+    "schemaVersion",
+    "orderId",
+    "seatIds",
+    "reason"
+  ]
+}
