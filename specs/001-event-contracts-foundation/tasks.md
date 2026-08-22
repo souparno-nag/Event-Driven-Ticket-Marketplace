@@ -105,7 +105,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T034 [P] [US2] Add the `zipkin` service — `mem_limit: 256m`, profiles `["obs","full"]`, health endpoint probe
 - [x] T035 [P] [US2] Add the `prometheus` service — `mem_limit: 256m`, `--storage.tsdb.retention.time=6h`, profiles `["obs","full"]`, `/-/healthy` probe, and `extra_hosts: ["host.docker.internal:host-gateway"]`. WHY comment: the alias is Docker Desktop-only and must be declared explicitly on the native engine (R9)
 - [x] T036 [P] [US2] Create `infra/prometheus/prometheus.yml` with a minimal global scrape config and no targets yet (service targets arrive at step 8)
-- [ ] T037 [US2] Create `infra/.env` containing `COMPOSE_PROFILES=core` with a comment listing the valid values `core | obs | full` and their approximate footprints (R11)
+- [x] T037 [US2] Create `infra/.env` containing `COMPOSE_PROFILES=core` with a comment listing the valid values `core | obs | full` and their approximate footprints (R11)
 - [ ] T038 [US2] Add `depends_on` with `condition: service_healthy` wherever ordering matters, so no dependent starts before its dependency is serving (FR-013)
 - [ ] T039 [US2] Create `Makefile` with targets `up` (compose up -d honouring `COMPOSE_PROFILES`), `down` (compose down **-v**, removing volumes for a clean reset), `build` (`./mvnw clean verify`), and `logs`
 - [ ] T040 [US2] Add the `health` target to `Makefile` — prints one line per component **derived from the active profile**, not a hardcoded list of seven. A hardcoded list reports false failures under `core` (FR-016, R11 consequence)
