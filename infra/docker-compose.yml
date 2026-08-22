@@ -268,6 +268,50 @@ services:
       retries: 10
       start_period: 20s
 
+  # ---------------------------------------------------------------------------------------------
+  # Prometheus — metrics. Scrapes /actuator/prometheus from each service, starting at build step 8.
+  # ---------------------------------------------------------------------------------------------
+  prometheus:
+    # The -busybox variant deliberately, not the plain tag. Prometheus also publishes a distroless
+    # image, which has no shell and no wget — and the health probe below needs one. Choosing the
+    # variant explicitly beats discovering the difference through a container that is permanently
+    # unhealthy.
+    image: prom/prometheus:v3.13.2-busybox
+    container_name: prometheus
+    profiles: ["obs", "full"]
+    ports:
+      - "9090:9090"
+    volumes:
+      # Read-only: Prometheus never needs to write its own configuration, and :ro means a bug or a
+      # bad reload cannot rewrite the file on the host.
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Six hours. The default is fifteen days of metrics on disk, which is storage this project has
+      # no use for — nobody is investigating last Tuesday on a local demo.
+      - --storage.tsdb.retention.time=6h
+    extra_hosts:
+      # WHY this line is here and not on any other service: Prometheus is the one component that
+      # initiates connections OUT to the services it monitors, and in build steps 2-7 those run on
+      # the host from an IDE rather than in a container. From inside a container, `localhost` is the
+      # container itself, so a scrape target of localhost:8081 finds nothing.
+      #
+      # host.docker.internal resolves to the host. Docker Desktop provides it automatically; the
+      # native Linux engine does NOT, so it has to be declared explicitly (R9). Omitting it produces
+      # scrapes failing with "no such host" on a machine where the same config works for a colleague
+      # on Docker Desktop — a difference in the runtime masquerading as a configuration bug.
+      - "host.docker.internal:host-gateway"
+    mem_limit: 256m
+    mem_reservation: 128m
+    memswap_limit: 256m
+    healthcheck:
+      # /-/healthy is Prometheus's own readiness endpoint. wget, because this image is busybox-based.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 volumes:
   kafka-data:
   postgres-data:
