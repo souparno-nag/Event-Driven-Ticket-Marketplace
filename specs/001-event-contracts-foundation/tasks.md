@@ -50,7 +50,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
 - [x] T008 [P] Create `common-events/src/main/java/com/marketplace/events/RejectionReason.java` — enum `SEATS_ALREADY_HELD`, `SEATS_NOT_FOUND`, `SHOW_NOT_FOUND` (data-model.md, FR-009)
-- [ ] T009 [P] Create `common-events/src/main/java/com/marketplace/events/PaymentFailureReason.java` — enum `DECLINED`, `TIMEOUT`, `PROVIDER_ERROR`
+- [x] T009 [P] Create `common-events/src/main/java/com/marketplace/events/PaymentFailureReason.java` — enum `DECLINED`, `TIMEOUT`, `PROVIDER_ERROR`
 - [ ] T010 [P] Create `common-events/src/main/java/com/marketplace/events/CancellationReason.java` — enum `PAYMENT_FAILED`, `SEATS_UNAVAILABLE`, `RESERVATION_EXPIRED`. Include a WHY comment on `RESERVATION_EXPIRED` noting it exists now for the step-4 fencing check so the contract need not be versioned later
 - [ ] T011 Create `common-events/src/main/java/com/marketplace/events/Topics.java` — public constants for the seven channel names (`order.created`, `seats.reserved`, `seats.rejected`, `payment.succeeded`, `payment.failed`, `order.confirmed`, `order.cancelled`), a `dlt(String)` helper appending `.DLT`, and an unmodifiable `ALL` list. WHY comment: channel names are part of the contract, so a publisher cannot invent a name consumers do not know (R4, R5)
 - [ ] T012 Create `common-events/src/main/java/com/marketplace/events/SagaEvent.java` — sealed interface permitting the seven record types, declaring only the four envelope accessors `messageId()`, `sagaId()`, `occurredAt()`, `schemaVersion()`. No state, no behaviour (R2, FR-002)
