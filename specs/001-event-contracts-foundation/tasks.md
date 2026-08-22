@@ -81,7 +81,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T021 [P] [US1] Create `SeatsRejected.java` — envelope plus `orderId`, `seatIds`, `reason`
 - [x] T022 [P] [US1] Create `PaymentSucceeded.java` — envelope plus `orderId`, `paymentId`, `amount`
 - [x] T023 [P] [US1] Create `PaymentFailed.java` — envelope plus `orderId`, `reason`
-- [ ] T024 [P] [US1] Create `OrderConfirmed.java` — envelope plus `orderId`, `seatIds`
+- [x] T024 [P] [US1] Create `OrderConfirmed.java` — envelope plus `orderId`, `seatIds`
 - [ ] T025 [P] [US1] Create `OrderCancelled.java` — envelope plus `orderId`, `reason`
 - [ ] T026 [US1] Wire the seven records into the `SagaEvent` permits clause and confirm the sealed hierarchy compiles
 - [ ] T027 [US1] Add a `TRADEOFF:` comment in `SagaEvent.java` recording that envelope fields are duplicated across records rather than extracted into a wrapper, and why nesting was rejected (R2, CLAUDE.md constraint)
