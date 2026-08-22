@@ -76,7 +76,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 
 ### Implementation for User Story 1
 
-- [ ] T019 [P] [US1] Create `OrderCreated.java` — record of the four envelope components plus `orderId`, `userId`, `showId`, `seatIds`, `amount`; compact constructor validating and copying `seatIds` into an unmodifiable list; implements `SagaEvent`
+- [x] T019 [P] [US1] Create `OrderCreated.java` — record of the four envelope components plus `orderId`, `userId`, `showId`, `seatIds`, `amount`; compact constructor validating and copying `seatIds` into an unmodifiable list; implements `SagaEvent`
 - [ ] T020 [P] [US1] Create `SeatsReserved.java` — envelope plus `orderId`, `seatIds`, `reservationId`, `lockExpiresAt`; compact constructor additionally asserting `lockExpiresAt` is strictly after `occurredAt`. WHY comment explaining the fencing purpose (FR-008)
 - [ ] T021 [P] [US1] Create `SeatsRejected.java` — envelope plus `orderId`, `seatIds`, `reason`
 - [ ] T022 [P] [US1] Create `PaymentSucceeded.java` — envelope plus `orderId`, `paymentId`, `amount`
