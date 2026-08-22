@@ -6,73 +6,84 @@ live in [research.md](./research.md).
 
 ---
 
-## Prerequisites — resolve these first
+## Prerequisites
 
-Checked on this machine. Only one is genuinely blocking.
+Verified on this machine — **all clear as of 2026-08-22**.
 
 | Prerequisite | Status |
 |---|---|
 | Java 21 | ✅ OpenJDK 21.0.11 |
-| Docker engine | ✅ 29.7.2 |
+| Docker engine + daemon | ✅ 29.7.2, active and enabled |
+| Docker context | ✅ `default` — native engine, Ubuntu 22.04.5 |
+| Docker group membership | ✅ |
 | Docker Compose | ✅ v2.39.1 |
-| cgroups v2 + memory controller | ✅ kernel 6.8 — needed for per-container limits |
-| Maven | ⚠️ 3.6.3 — on Spring Boot's exact floor |
-| Docker context | ⚠️ `desktop-linux` — switch to native, Step 2 |
-| Docker daemon | ❌ **not reachable** — Step 1 |
-| Free memory | ⚠️ 953 MiB of 15 GiB, swap exhausted — Step 3 |
+| cgroups v2 memory enforcement | ✅ verified: `-m 64m` ⇒ `memory.max = 67108864` |
+| Visible memory | ✅ 15.3 GiB — full host, no VM slice |
+| Maven | ⚠️ 3.6.3 — on Spring Boot's exact floor, see wrapper note below |
 | k6 | ➖ absent, not needed until step 9 |
 
-Per Constitution Principle V, these are steps for you to run — nothing here is executed
-automatically.
+Per Constitution Principle V, anything below requiring installation or elevated privileges is
+written as steps for you to run, never executed automatically.
 
-### Step 1 — Start the Docker daemon (blocking)
+### Re-establishing this setup (on a new machine, or if it regresses)
 
-The engine is installed but nothing is listening. Diagnose first:
-
-```bash
-docker info
-systemctl status docker
-```
+The daemon runs as `docker.service` and the client must point at it rather than at Docker
+Desktop's socket.
 
 ```bash
-sudo systemctl start docker
-sudo systemctl enable docker        # start on boot
+sudo systemctl enable --now docker     # daemon running and starting on boot
+sudo usermod -aG docker "$USER"        # then LOG OUT and back in — a new tab is not enough
+docker context use default             # point the client at the native engine
 ```
 
-If it starts but you get a permission error, add yourself to the `docker` group — **you must log
-out and back in** for it to take effect:
+Verify — the OS line must show your distribution, **not** "Docker Desktop":
 
 ```bash
-sudo usermod -aG docker "$USER"
-newgrp docker                        # applies to the current shell only
+docker context ls                                    # `default` should be starred
+docker info --format '{{.OperatingSystem}} | cgroup {{.CgroupVersion}} | mem {{.MemTotal}}'
+docker run --rm hello-world
+docker run --rm -m 64m busybox cat /sys/fs/cgroup/memory.max   # expect 67108864
 ```
 
-Verify: `docker run --rm hello-world`
+That last command is the one worth keeping: it proves cgroup limits are actually enforced, which
+is what every `mem_limit` in the Compose file depends on.
 
-### Step 2 — Switch to the native engine (the big memory win)
+### Why the native engine rather than Docker Desktop
 
-Your active context is `desktop-linux`. On Linux, Docker Desktop runs every container inside a
-**virtual machine** — a second kernel with 1–2 GiB of overhead and a fixed memory ceiling that
-applies no matter how much host memory is free. Native `docker.service` is already installed and
-enabled on your machine; it just is not the active context.
-
-```bash
-docker context ls                    # confirm desktop-linux is starred
-docker context use default           # switch to the native engine
-docker info | grep -i "operating system"
-```
-
-You want your actual distribution there, not "Docker Desktop".
+On Linux, Docker Desktop runs every container inside a **virtual machine** — a second kernel with
+1–2 GiB of overhead and a fixed memory ceiling that applies no matter how much host memory is
+free. The native engine runs containers as processes on your own kernel: no VM, no ceiling.
 
 This is also why **moving PostgreSQL or Redis out of Docker would not have helped.** A Linux
 container is not a VM — it is a process with namespaces and cgroups applied. Containerised
 PostgreSQL and apt-installed PostgreSQL use nearly the same memory. The overhead worth escaping is
 the Desktop VM, and switching context escapes it without giving up one-command startup.
 
-### Step 3 — Free some memory (less than you would think)
+On Linux the native engine is the standard runtime — Docker Desktop for Linux is a convenience
+wrapper added in 2022, and servers and CI runners overwhelmingly run the engine directly. You lose
+the Desktop GUI (`docker ps` and `docker stats` cover it, or install `lazydocker` for a TUI) and
+Desktop's bundled Kubernetes, which is irrelevant here because step 10 targets Minikube either
+way. Bind mounts and `localhost` networking both get faster.
 
-With Steps 1–2 done plus the limits and profiles built into the Compose file, the `core` profile
-needs only about **1.1 GiB**, not the 6 GiB an untuned stack would demand.
+**One behavioural difference to remember for step 8**: `host.docker.internal` is a Desktop-only
+hostname and does not resolve on the native engine. A container that needs to reach a service on
+your host — Prometheus scraping a host-run Spring Boot service, for instance — needs the alias
+declared explicitly:
+
+```yaml
+prometheus:
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+```
+
+The symptom if it is missed is a scrape target stuck in `DOWN` with a DNS error, which looks like
+a Prometheus misconfiguration rather than a runtime difference. The reverse direction is fine:
+host processes reach published container ports at plain `localhost`.
+
+### How much memory you actually need
+
+With the native engine plus the limits and profiles built into the Compose file, the `core`
+profile needs only about **1.1 GiB**, not the 6 GiB an untuned stack would demand.
 
 ```bash
 free -h

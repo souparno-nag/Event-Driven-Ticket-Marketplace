@@ -85,8 +85,28 @@ rename is a compile error rather than a runtime mystery.
 **Alternatives considered**:
 - *Broker auto-create*: creates topics on first reference with default partition counts, silently
   defeating FR-027's multi-partition requirement.
-- *A Compose init container running the CLI*: adds a container and shell scripting, and drifts
-  from the constants the code actually publishes to.
+
+### Amendment — provisioning in step 1 specifically
+
+The decision above holds from step 2 onward, but it cannot satisfy SC-009 in *this* step.
+`KafkaAdmin` creates declared topics when a Spring application context starts, and step 1 contains
+no Spring application — `common-events` is deliberately framework-free (FR-010). Yet SC-009
+requires fourteen channels to exist after `make up`, with no service built yet.
+
+**Resolution**: step 1 provisions channels with a one-shot `kafka-init` Compose service running
+`kafka-topics.sh --if-not-exists` for each name. From step 2, services additionally declare
+`NewTopic` beans; because both paths are idempotent, they coexist safely and the beans become the
+long-term source of truth.
+
+**Cost, and how it is covered**: the init script is a second place channel names are written, so
+it can drift from `Topics.java`. This was the original reason for rejecting an init container, and
+it is a real risk rather than a hypothetical one. `TopicNameDriftTest` (task T045) asserts the
+constants and the provisioned set agree, converting a silent drift into a failing build.
+
+**Alternative rejected**: adding a dedicated `topic-provisioner` Spring Boot module in step 1.
+It would keep `Topics.java` as the single source, but introduces a module the project brief does
+not list, and creates a chicken-and-egg problem — `make up` would depend on a built jar, breaking
+the property that the environment starts from a clean checkout without a prior build.
 
 ---
 
@@ -195,6 +215,39 @@ inventory, payment, and projection later) are worth running via `spring-boot:run
 during development — for development-loop reasons rather than memory. Instant restarts, debugger
 attach, and no image rebuild per change. They connect to containerised infrastructure over
 `localhost`. Infrastructure in Compose, your own code on the host, is the standard hybrid.
+
+**Secondary benefits of the native engine**, beyond reclaiming the VM's memory:
+
+- *Bind mounts are direct filesystem access.* Docker Desktop proxies host files into its VM over
+  virtiofs/gRPC-FUSE, which is markedly slower. This is felt whenever a host directory is mounted
+  into a container — a shared `.m2` cache being the obvious case here.
+- *Networking has no forwarding hop.* Published ports are reached at plain `localhost` rather than
+  being forwarded through the VM's network stack.
+- *`docker stats` reports against real host memory*, so the cgroup limits in R10 govern the full
+  16 GiB rather than a slice of a VM.
+
+### Known behavioural difference: `host.docker.internal`
+
+`host.docker.internal` is a Docker Desktop convenience hostname and **does not resolve on the
+native engine by default**. Any container needing to reach a service on the host must be given the
+alias explicitly:
+
+```yaml
+prometheus:
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+```
+
+`host-gateway` is a built-in alias the engine resolves to the bridge gateway address.
+
+**Where this bites**: step 8, when Prometheus running in a container scrapes Spring Boot services
+running on the host under the hybrid development model above. The failure presents as a scrape
+target stuck in `DOWN` with a DNS resolution error, which reads like a Prometheus configuration
+problem rather than a runtime difference. Recorded here so it is designed in rather than
+diagnosed later.
+
+The reverse direction is unaffected: host processes reach published container ports at
+`localhost`, and more directly than under Docker Desktop.
 
 ---
 

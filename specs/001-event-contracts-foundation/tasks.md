@@ -1,0 +1,191 @@
+---
+
+description: "Task list for Event Contracts & Local Foundation"
+---
+
+# Tasks: Event Contracts & Local Foundation
+
+**Input**: Design documents from `/specs/001-event-contracts-foundation/`
+
+**Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/, quickstart.md
+
+**Tests**: Test tasks ARE included. Constitution Principle II requires them, and the spec carries
+test-backed success criteria (SC-003 round-trip, SC-011 ordering under concurrency).
+
+**Organization**: Grouped by user story so each is independently implementable and testable.
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: Can run in parallel (different files, no dependency on incomplete work)
+- **[Story]**: US1, US2, US3 — maps to the user stories in spec.md
+- Every task names an exact file path
+
+## Path Conventions
+
+Multi-module Maven project, build root at the repository root. Module sources live under
+`<module>/src/main/java/...`, infrastructure under `infra/`.
+
+---
+
+## Phase 1: Setup (Shared Infrastructure)
+
+**Purpose**: Repository skeleton and build root, so anything can compile.
+
+- [ ] T001 Create the directory skeleton `common-events/src/main/java/com/marketplace/events/`, `common-events/src/test/java/com/marketplace/events/`, and `infra/prometheus/` per plan.md
+- [ ] T002 Create the build root `pom.xml`: packaging `pom`, Java 21 release, `<modules>` listing `common-events`, and a `dependencyManagement` block importing the Spring Boot 3.3.x BOM plus pinned Jackson, JUnit 5, AssertJ, and Testcontainers versions (FR-019)
+- [ ] T003 Generate the Maven wrapper pinned to 3.9.9 by running `mvn wrapper:wrapper -Dmaven=3.9.9`, and commit `mvnw`, `mvnw.cmd`, and `.mvn/` (R12 — the installed Maven 3.6.3 sits on Spring Boot's exact floor)
+- [ ] T004 [P] Create `.gitignore` covering `target/`, `.idea/`, `*.iml`, `.DS_Store`, and `infra/data/`
+- [ ] T005 [P] Create `common-events/pom.xml` declaring only `jackson-annotations` (compile), plus `jackson-databind`, `jackson-datatype-jsr310`, JUnit 5, and AssertJ at test scope — no Spring, no Lombok (FR-010, R1, R13)
+- [ ] T006 Verify the skeleton builds: `./mvnw clean verify` succeeds with an empty `common-events` module
+
+**Checkpoint**: Build root compiles. No contracts yet.
+
+---
+
+## Phase 2: Foundational (Blocking Prerequisites)
+
+**Purpose**: Shared types and constants every message record depends on.
+
+**⚠️ CRITICAL**: No user story work can begin until this phase is complete.
+
+- [ ] T007 [P] Create `common-events/src/main/java/com/marketplace/events/RejectionReason.java` — enum `SEATS_ALREADY_HELD`, `SEATS_NOT_FOUND`, `SHOW_NOT_FOUND` (data-model.md, FR-009)
+- [ ] T008 [P] Create `common-events/src/main/java/com/marketplace/events/PaymentFailureReason.java` — enum `DECLINED`, `TIMEOUT`, `PROVIDER_ERROR`
+- [ ] T009 [P] Create `common-events/src/main/java/com/marketplace/events/CancellationReason.java` — enum `PAYMENT_FAILED`, `SEATS_UNAVAILABLE`, `RESERVATION_EXPIRED`. Include a WHY comment on `RESERVATION_EXPIRED` noting it exists now for the step-4 fencing check so the contract need not be versioned later
+- [ ] T010 Create `common-events/src/main/java/com/marketplace/events/Topics.java` — public constants for the seven channel names (`order.created`, `seats.reserved`, `seats.rejected`, `payment.succeeded`, `payment.failed`, `order.confirmed`, `order.cancelled`), a `dlt(String)` helper appending `.DLT`, and an unmodifiable `ALL` list. WHY comment: channel names are part of the contract, so a publisher cannot invent a name consumers do not know (R4, R5)
+- [ ] T011 Create `common-events/src/main/java/com/marketplace/events/SagaEvent.java` — sealed interface permitting the seven record types, declaring only the four envelope accessors `messageId()`, `sagaId()`, `occurredAt()`, `schemaVersion()`. No state, no behaviour (R2, FR-002)
+- [ ] T012 Create `common-events/src/main/java/com/marketplace/events/EventJson.java` — a factory returning a configured `ObjectMapper`: `JavaTimeModule` registered, `WRITE_DATES_AS_TIMESTAMPS` disabled, `FAIL_ON_UNKNOWN_PROPERTIES` disabled, `WRITE_BIGDECIMAL_AS_PLAIN` enabled (R3, FR-006, FR-007). Test scope is acceptable if production code never serializes here
+- [ ] T013 Create `common-events/src/main/java/com/marketplace/events/Validation.java` — package-private helpers `requireNonNull`, `requireSagaMatchesOrder`, `requireNonEmptyDistinctSeats`, `requireMoney` (non-negative, scale exactly 2), `requireSchemaVersion` (data-model.md validation rules 1–5)
+
+**Checkpoint**: Shared vocabulary exists. All three stories unblocked.
+
+---
+
+## Phase 3: User Story 1 — Frozen event contracts (Priority: P1) 🎯 MVP
+
+**Goal**: Seven immutable message types with a stable serialized form any service can depend on.
+
+**Independent test**: `./mvnw -pl common-events test` passes with no infrastructure running.
+
+### Tests for User Story 1
+
+- [ ] T014 [P] [US1] Create `common-events/src/test/java/com/marketplace/events/ContractRoundTripTest.java` — for each of the seven types, serialize a populated instance and deserialize it back, asserting full equality including `seatIds` contents and `Instant` precision (SC-003, SC-006, FR-006)
+- [ ] T015 [P] [US1] Add a test to `ContractRoundTripTest` deserializing a payload carrying an unrecognised extra field, asserting it succeeds and the field is ignored (FR-007)
+- [ ] T016 [P] [US1] Create `common-events/src/test/java/com/marketplace/events/ValidationTest.java` — assert each invalid construction is rejected: null envelope field, `sagaId` ≠ `orderId`, empty `seatIds`, duplicate `seatIds`, negative amount, amount with scale ≠ 2, `schemaVersion` < 1, and `lockExpiresAt` not after `occurredAt`
+- [ ] T017 [P] [US1] Create `common-events/src/test/java/com/marketplace/events/NamingConventionTest.java` — reflectively assert no record component in the package is named `eventId`, and that `messageId` and `showId` both exist and are distinct (SC-007, FR-003)
+
+### Implementation for User Story 1
+
+- [ ] T018 [P] [US1] Create `OrderCreated.java` — record of the four envelope components plus `orderId`, `userId`, `showId`, `seatIds`, `amount`; compact constructor validating and copying `seatIds` into an unmodifiable list; implements `SagaEvent`
+- [ ] T019 [P] [US1] Create `SeatsReserved.java` — envelope plus `orderId`, `seatIds`, `reservationId`, `lockExpiresAt`; compact constructor additionally asserting `lockExpiresAt` is strictly after `occurredAt`. WHY comment explaining the fencing purpose (FR-008)
+- [ ] T020 [P] [US1] Create `SeatsRejected.java` — envelope plus `orderId`, `seatIds`, `reason`
+- [ ] T021 [P] [US1] Create `PaymentSucceeded.java` — envelope plus `orderId`, `paymentId`, `amount`
+- [ ] T022 [P] [US1] Create `PaymentFailed.java` — envelope plus `orderId`, `reason`
+- [ ] T023 [P] [US1] Create `OrderConfirmed.java` — envelope plus `orderId`, `seatIds`
+- [ ] T024 [P] [US1] Create `OrderCancelled.java` — envelope plus `orderId`, `reason`
+- [ ] T025 [US1] Wire the seven records into the `SagaEvent` permits clause and confirm the sealed hierarchy compiles
+- [ ] T026 [US1] Add a `TRADEOFF:` comment in `SagaEvent.java` recording that envelope fields are duplicated across records rather than extracted into a wrapper, and why nesting was rejected (R2, CLAUDE.md constraint)
+- [ ] T027 [US1] Verify no framework leaked in: `./mvnw -pl common-events dependency:tree` shows no `org.springframework` and no `org.projectlombok` at compile scope (quickstart Scenario 2, FR-010)
+
+**Checkpoint**: US1 complete and independently shippable. This is the MVP.
+
+---
+
+## Phase 4: User Story 2 — One-command healthy environment (Priority: P2)
+
+**Goal**: `make up` brings the active profile to full health; teardown and restart reproduce it.
+
+**Independent test**: `make up && make health` on a clean checkout; then ten `make down`/`make up` cycles.
+
+- [ ] T028 [US2] Create `infra/docker-compose.yml` with the `kafka` service — KRaft combined mode, fixed `CLUSTER_ID`, named volume, `mem_limit: 768m`, `mem_reservation: 512m`, `memswap_limit: 768m`, `KAFKA_HEAP_OPTS=-Xms512m -Xmx512m`, profiles `["core","full"]`, healthcheck via `kafka-broker-api-versions` (R7, R8, R10, R11)
+- [ ] T029 [P] [US2] Add the `postgres` service to `infra/docker-compose.yml` — PostgreSQL 16, `mem_limit: 256m`, `shared_buffers=128MB`, profiles `["core","full"]`, healthcheck `pg_isready`
+- [ ] T030 [P] [US2] Add the `redis` service — Redis 7, `mem_limit: 96m`, `--maxmemory 64mb --maxmemory-policy noeviction`, profiles `["core","full"]`, healthcheck `redis-cli ping`
+- [ ] T031 [P] [US2] Add the `elasticsearch` service — ES 8, single-node, security disabled, `mem_limit: 1g`, `ES_JAVA_OPTS=-Xms640m -Xmx640m`, profile `["full"]`, healthcheck accepting cluster status **yellow or green**. WHY comment: a single-node cluster cannot allocate replicas so it never reaches green (R8, R9)
+- [ ] T032 [P] [US2] Add the `eureka` service — `mem_limit: 384m`, `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=65`, profile `["full"]`, actuator health probe
+- [ ] T033 [P] [US2] Add the `zipkin` service — `mem_limit: 256m`, profiles `["obs","full"]`, health endpoint probe
+- [ ] T034 [P] [US2] Add the `prometheus` service — `mem_limit: 256m`, `--storage.tsdb.retention.time=6h`, profiles `["obs","full"]`, `/-/healthy` probe, and `extra_hosts: ["host.docker.internal:host-gateway"]`. WHY comment: the alias is Docker Desktop-only and must be declared explicitly on the native engine (R9)
+- [ ] T035 [P] [US2] Create `infra/prometheus/prometheus.yml` with a minimal global scrape config and no targets yet (service targets arrive at step 8)
+- [ ] T036 [US2] Create `infra/.env` containing `COMPOSE_PROFILES=core` with a comment listing the valid values `core | obs | full` and their approximate footprints (R11)
+- [ ] T037 [US2] Add `depends_on` with `condition: service_healthy` wherever ordering matters, so no dependent starts before its dependency is serving (FR-013)
+- [ ] T038 [US2] Create `Makefile` with targets `up` (compose up -d honouring `COMPOSE_PROFILES`), `down` (compose down **-v**, removing volumes for a clean reset), `build` (`./mvnw clean verify`), and `logs`
+- [ ] T039 [US2] Add the `health` target to `Makefile` — prints one line per component **derived from the active profile**, not a hardcoded list of seven. A hardcoded list reports false failures under `core` (FR-016, R11 consequence)
+- [ ] T040 [US2] Create `infra/README.md` documenting the profile table with footprints, the per-component memory budget, the port map, and the exit-code-137 OOM diagnostic (FR-017)
+- [ ] T041 [US2] Verify Scenario 3: `make up && make health` reaches full health under `core`, then repeat once under `COMPOSE_PROFILES=full` to validate SC-001 and SC-002 against the complete environment
+- [ ] T042 [US2] Verify Scenario 4: run ten consecutive `make down` / `make up` cycles, all reaching healthy (SC-005, FR-015)
+
+**Checkpoint**: Environment reproducible. US1 and US2 both shippable.
+
+---
+
+## Phase 5: User Story 3 — Reproducible build and message channels (Priority: P3)
+
+**Goal**: One root build command; fourteen channels present without manual provisioning.
+
+**Independent test**: `./mvnw clean verify` from clean checkout; channel listing shows fourteen.
+
+- [ ] T043 [US3] Create `infra/kafka-init/create-topics.sh` — creates all seven channels plus their `.DLT` pairs with `--if-not-exists`, `--partitions 3`, `--replication-factor 1` (FR-020, FR-021, FR-027)
+- [ ] T044 [US3] Add the `kafka-init` one-shot service to `infra/docker-compose.yml` — depends on `kafka` being healthy, runs `create-topics.sh`, exits 0, `restart: "no"`, profiles `["core","full"]`. Add a `TRADEOFF:` comment recording that R4 originally specified `NewTopic` beans, which require a running Spring application that does not exist until step 2
+- [ ] T045 [P] [US3] Create `common-events/src/test/java/com/marketplace/events/TopicNameDriftTest.java` — asserts `Topics.ALL` has exactly seven entries and that `Topics.dlt()` matches the `.DLT` suffix used by the provisioning script, closing the drift risk the init-container approach introduces
+- [ ] T046 [US3] Verify Scenario 5: list channels and assert exactly fourteen; `--describe order.created` shows `PartitionCount: 3` and `ReplicationFactor: 1`. Re-run `make up` without teardown to confirm idempotency (SC-009, FR-021)
+- [ ] T047 [US3] Create `common-events/src/test/java/com/marketplace/events/OrderingGuaranteeIT.java` — Testcontainers Kafka; publish 100 orders concurrently, several messages each, keyed by `sagaId`; assert every order's messages are consumed in production order and that messages from different orders interleave, proving partitioning is real (SC-011, FR-026, FR-027)
+- [ ] T048 [US3] Bind `OrderingGuaranteeIT` to the `verify` phase via `maven-failsafe-plugin` in the build root, so integration tests run separately from unit tests
+- [ ] T049 [US3] Verify Scenario 7: `./mvnw clean verify` from a clean checkout builds and tests all modules in dependency order (SC-004)
+- [ ] T050 [US3] Verify SC-008: add a throwaway empty module, confirm the only edits needed are one `<module>` line in the root `pom.xml` plus the new module's own `pom.xml`, then remove it
+
+**Checkpoint**: All three stories complete.
+
+---
+
+## Phase 6: Polish & Cross-Cutting Concerns
+
+- [ ] T051 [P] Review each JSON schema in `specs/001-event-contracts-foundation/contracts/` field-for-field against its record. There is no registry enforcing this, so it is a manual gate (contracts/README.md)
+- [ ] T052 [P] Create the repository `README.md` — what the project is, prerequisites, `make up` quickstart, profile table, and a link to the spec directory. The full saga diagram and rationale sections arrive at build step 11
+- [ ] T053 [P] Add a `TRADEOFF:` comment in `infra/docker-compose.yml` recording replication factor 1 as a single-broker local constraint, not a production topology (R6)
+- [ ] T054 Confirm every non-obvious line carries a WHY comment rather than a WHAT comment, per the project constraints
+- [ ] T055 Walk the Definition of Done checklist in `quickstart.md` end to end and tick every item
+
+---
+
+## Dependencies
+
+```text
+Phase 1 Setup  ──►  Phase 2 Foundational  ──┬──►  Phase 3 (US1, P1)  ──►  MVP
+                                            │
+                                            ├──►  Phase 4 (US2, P2)   [independent of US1]
+                                            │
+                                            └──►  Phase 5 (US3, P3)   [needs US1 + US2]
+                                                          │
+                                                          ▼
+                                                  Phase 6 Polish
+```
+
+- **US1** depends only on Phase 2. Fully testable with nothing running.
+- **US2** depends only on Phase 1 — it touches no Java. Can proceed in parallel with US1.
+- **US3** genuinely depends on both: T045/T047 need the records from US1, and T043/T046 need the running Kafka from US2. This is the one real cross-story dependency, and it is why US3 is P3.
+
+## Parallel Execution Opportunities
+
+**Phase 2**: T007, T008, T009 are three independent enum files — fully parallel.
+
+**Phase 3**: T014–T017 (four test files) all parallel; T018–T024 (seven records) all parallel once
+Phase 2 lands. T025 must follow all seven.
+
+**Phase 4**: T029–T035 all edit distinct concerns and can be written in parallel after T028
+establishes the Compose file. T037 must follow all service definitions.
+
+**Across stories**: US1 (Java) and US2 (infrastructure) share no files and can be worked
+simultaneously by two people, or interleaved by one.
+
+## Implementation Strategy
+
+**MVP = Phase 1 + Phase 2 + Phase 3 (US1).** That is 27 tasks producing a frozen, tested contract
+library — the artifact every later build step imports. It is independently valuable even if the
+environment work slipped, because steps 2 onward cannot start without stable contracts.
+
+**Increment 2**: Phase 4 (US2) gives a reproducible environment, unblocking any step needing a
+broker or database.
+
+**Increment 3**: Phase 5 (US3) closes channel provisioning and the ordering guarantee — the
+correctness property the whole saga rests on.
+
+**Suggested order for one developer**: Phases 1 → 2 → 3 → 4 → 5 → 6, stopping at each checkpoint
+to verify before proceeding, per the project's build-order instruction to pause after each step.

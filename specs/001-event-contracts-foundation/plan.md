@@ -53,17 +53,21 @@ documented memory floor. Contract module must remain framework-free (FR-010).
 |---|---|---|
 | Java 21 | ✅ OpenJDK 21.0.11 | None |
 | Maven | ⚠️ 3.6.3 (released 2020) | Sits on Spring Boot 3.x's exact minimum. Commit the wrapper — R12 |
-| Docker engine | ✅ 29.7.2 installed | None |
-| Docker daemon | ❌ **not reachable** | **Blocker** — must be resolved before any container work |
-| Docker context | ⚠️ `desktop-linux` active | Switch to native engine — R9. Native `docker.service` already installed and enabled |
+| Docker engine | ✅ 29.7.2, daemon active | Resolved |
+| Docker context | ✅ `default` — native engine, Ubuntu 22.04.5 | Resolved; `docker info` confirms the host OS, not "Docker Desktop" |
+| Docker group | ✅ user is a member | Resolved |
 | Docker Compose | ✅ v2.39.1 | None |
-| cgroups v2 + memory controller | ✅ kernel 6.8 | None — required for the per-container limits in R10 |
+| cgroups v2 + memory controller | ✅ kernel 6.8, **enforcement verified** | `docker run -m 64m` yields `memory.max = 67108864`, so R10's limits work as designed |
+| Visible memory | ✅ 15.3 GiB — full host, no VM slice | Resolved by the context switch |
 | k6 | ❌ absent | Not needed until build step 9 |
-| Free memory | ⚠️ 953 MiB of 15 GiB, swap exhausted | Largely addressed by design — see below |
 
-Only the Docker daemon is a hard blocker. The memory situation, which initially looked like one,
-is mostly answered by design decisions R9–R11 rather than by asking the developer to free several
-gigabytes:
+**All environment blockers are cleared.** The daemon was in fact running throughout; the original
+"not reachable" reading was caused by the active context pointing at Docker Desktop's socket while
+Desktop itself was not running. Switching to the native engine resolved it and simultaneously
+removed the VM memory ceiling.
+
+The memory situation, which initially looked like a blocker, is answered by design decisions
+R9–R11 rather than by asking the developer to free several gigabytes:
 
 - **R9** switches off Docker Desktop, whose Linux VM costs 1–2 GiB of overhead and imposes a fixed
   ceiling regardless of free host memory. The native engine runs containers as host processes.
@@ -157,8 +161,9 @@ common-events/
         └── ContractRoundTripTest.java
 
 infra/
-├── docker-compose.yml           # 7 components: profiles, mem_limits, health checks, depends_on
+├── docker-compose.yml           # 7 components + kafka-init: profiles, mem_limits, healthchecks
 ├── .env                         # COMPOSE_PROFILES — the one knob selecting the component set
+├── kafka-init/create-topics.sh  # one-shot channel provisioning (R4 amendment)
 ├── prometheus/prometheus.yml
 └── README.md                    # profile table, memory budget, port map
 
