@@ -11,27 +11,20 @@ import java.util.UUID;
  * inheritance available here even if it were wanted (R2). What it buys is a single type a consumer
  * can {@code switch} over.
  *
- * <p>Its purpose is exhaustiveness. Once this interface is sealed, the compiler knows the complete
- * set of message types, so a {@code switch} covering all of them needs no {@code default} branch —
- * and adding an eighth message type later turns every such {@code switch} into a compile error
- * listing exactly what has not been handled. Without sealing, that same omission is a
- * {@code default} branch silently ignoring a message at runtime.
+ * <p>Its purpose is exhaustiveness. Sealing tells the compiler the complete set of message types, so
+ * a {@code switch} covering all seven needs no {@code default} branch — and adding an eighth turns
+ * every such {@code switch} into a compile error listing exactly what has not been handled. Without
+ * sealing, that same omission is a {@code default} branch quietly ignoring a message at runtime,
+ * which in this system means a saga that stalls with nothing reporting why.
  *
- * <p>SEALING IS COMPLETED IN T026, once the seven records exist. Java requires every type named in
- * a {@code permits} clause to be compiled alongside the interface, so the clause cannot be written
- * before its subtypes — the declaration would not compile, and neither would anything else in the
- * module. The intended final form, from data-model.md, is:
- *
- * <pre>{@code
- * public sealed interface SagaEvent
- *         permits OrderCreated, SeatsReserved, SeatsRejected,
- *                 PaymentSucceeded, PaymentFailed, OrderConfirmed, OrderCancelled {
- * }</pre>
- *
- * <p>Until then the interface is open, which is strictly weaker but never wrong: the records added
- * in Phase 3 implement it either way, and T026 only narrows who else may.
+ * <p>WHY the clause could not be written when this file was created: Java requires every type named
+ * in {@code permits} to compile alongside the interface, and the seven records did not exist yet.
+ * The interface was open until they did, which is strictly weaker than sealed but never wrong —
+ * sealing only narrows who may implement it.
  */
-public interface SagaEvent {
+public sealed interface SagaEvent
+		permits OrderCreated, SeatsReserved, SeatsRejected,
+				PaymentSucceeded, PaymentFailed, OrderConfirmed, OrderCancelled {
 
 	/**
 	 * Identity of <em>this message</em>, unique and never reused — not even when a failed publish
