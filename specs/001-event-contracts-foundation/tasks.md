@@ -69,7 +69,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 
 ### Tests for User Story 1
 
-- [ ] T015 [P] [US1] Create `common-events/src/test/java/com/marketplace/events/ContractRoundTripTest.java` — for each of the seven types, serialize a populated instance and deserialize it back, asserting full equality including `seatIds` contents and `Instant` precision (SC-003, SC-006, FR-006)
+- [x] T015 [P] [US1] Create `common-events/src/test/java/com/marketplace/events/ContractRoundTripTest.java` — for each of the seven types, serialize a populated instance and deserialize it back, asserting full equality including `seatIds` contents and `Instant` precision (SC-003, SC-006, FR-006)
 - [ ] T016 [P] [US1] Add a test to `ContractRoundTripTest` deserializing a payload carrying an unrecognised extra field, asserting it succeeds and the field is ignored (FR-007)
 - [ ] T017 [P] [US1] Create `common-events/src/test/java/com/marketplace/events/ValidationTest.java` — assert each invalid construction is rejected: null envelope field, `sagaId` ≠ `orderId`, empty `seatIds`, duplicate `seatIds`, negative amount, amount with scale ≠ 2, `schemaVersion` < 1, and `lockExpiresAt` not after `occurredAt`
 - [ ] T018 [P] [US1] Create `common-events/src/test/java/com/marketplace/events/NamingConventionTest.java` — reflectively assert no record component in the package is named `eventId`, and that `messageId` and `showId` both exist and are distinct (SC-007, FR-003)
