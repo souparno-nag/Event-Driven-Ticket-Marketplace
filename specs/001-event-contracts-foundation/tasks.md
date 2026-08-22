@@ -98,7 +98,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 **Independent test**: `make up && make health` on a clean checkout; then ten `make down`/`make up` cycles.
 
 - [x] T029 [US2] Create `infra/docker-compose.yml` with the `kafka` service — KRaft combined mode, fixed `CLUSTER_ID`, named volume, `mem_limit: 768m`, `mem_reservation: 512m`, `memswap_limit: 768m`, `KAFKA_HEAP_OPTS=-Xms512m -Xmx512m`, profiles `["core","full"]`, healthcheck via `kafka-broker-api-versions` (R7, R8, R10, R11)
-- [ ] T030 [P] [US2] Add the `postgres` service to `infra/docker-compose.yml` — PostgreSQL 16, `mem_limit: 256m`, `shared_buffers=128MB`, profiles `["core","full"]`, healthcheck `pg_isready`
+- [x] T030 [P] [US2] Add the `postgres` service to `infra/docker-compose.yml` — PostgreSQL 16, `mem_limit: 256m`, `shared_buffers=128MB`, profiles `["core","full"]`, healthcheck `pg_isready`
 - [ ] T031 [P] [US2] Add the `redis` service — Redis 7, `mem_limit: 96m`, `--maxmemory 64mb --maxmemory-policy noeviction`, profiles `["core","full"]`, healthcheck `redis-cli ping`
 - [ ] T032 [P] [US2] Add the `elasticsearch` service — ES 8, single-node, security disabled, `mem_limit: 1g`, `ES_JAVA_OPTS=-Xms640m -Xmx640m`, profile `["full"]`, healthcheck accepting cluster status **yellow or green**. WHY comment: a single-node cluster cannot allocate replicas so it never reaches green (R8, R9)
 - [ ] T033 [P] [US2] Add the `eureka` service — `mem_limit: 384m`, `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=65`, profile `["full"]`, actuator health probe

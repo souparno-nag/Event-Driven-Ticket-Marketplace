@@ -109,5 +109,50 @@ services:
       # retries, so a slow first boot does not mark the container unhealthy.
       start_period: 30s
 
+  # ---------------------------------------------------------------------------------------------
+  # PostgreSQL — durable state. Orders and the outbox in step 2, reservations in step 3.
+  # ---------------------------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    profiles: ["core", "full"]
+    ports:
+      - "5432:5432"
+    environment:
+      # Credentials in a committed file are fine here and nowhere else: this database is reachable
+      # only from localhost, holds nothing but generated demo data, and secrets management is
+      # explicitly out of scope for this project. A real deployment reads these from a secret store.
+      POSTGRES_USER: marketplace
+      POSTGRES_PASSWORD: marketplace
+      POSTGRES_DB: marketplace
+    command:
+      - postgres
+      # Matches the container limit deliberately. shared_buffers is PostgreSQL's page cache and is
+      # allocated up front, so it has to leave room for everything else inside 256 MiB (R10).
+      - -c
+      - shared_buffers=128MB
+      # WHY lower than the default 100: PostgreSQL forks a backend process per connection, each
+      # with its own memory, so a connection ceiling is a memory ceiling. Nothing here comes close
+      # — three services with a default Hikari pool of 10 is 30 — and 1000 k6 users in step 9 hit
+      # the gateway, not the database.
+      - -c
+      - max_connections=50
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    mem_limit: 256m
+    mem_reservation: 128m
+    memswap_limit: 256m
+    healthcheck:
+      # pg_isready asks the server whether it is accepting connections, which is readiness rather
+      # than liveness (R8). It matters more here than it looks: PostgreSQL starts, then runs crash
+      # recovery, and only then accepts connections. A port check would pass during recovery and a
+      # dependant starting on that signal would fail to connect.
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d marketplace"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   kafka-data:
+  postgres-data:
