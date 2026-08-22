@@ -26,6 +26,28 @@ public sealed interface SagaEvent
 		permits OrderCreated, SeatsReserved, SeatsRejected,
 				PaymentSucceeded, PaymentFailed, OrderConfirmed, OrderCancelled {
 
+	// TRADEOFF: the four envelope components are repeated on all seven records rather than
+	// extracted into a shared carrier. The alternative considered was a wrapper —
+	// record Envelope<T>(UUID messageId, UUID sagaId, Instant occurredAt, int schemaVersion, T payload)
+	// — which would define them once instead of seven times.
+	//
+	// Rejected because of the wire format it produces. Every business field would sit one level
+	// down inside "payload", so every consumer unwraps before reading anything, every JSON schema
+	// gains a nesting level, every log query and every jq expression grows a prefix, and schema
+	// evolution becomes two questions rather than one: did the envelope change, or the payload?
+	// The nesting is permanent and paid by every reader; the duplication is paid once, while
+	// typing, by us.
+	//
+	// Inheritance was never an option to weigh: records cannot extend a class. A shared interface
+	// like this one can declare accessors, which is exactly what it does, but it cannot hold state,
+	// so there is no version of "define the envelope once" that also keeps the JSON flat.
+	//
+	// The duplication is also the kind the project constitution explicitly prefers over premature
+	// abstraction. Seven records x four components is visible, obvious, and greppable. It stops
+	// being the right call if the envelope grows several more fields or the message count grows
+	// well past seven — at which point the wrapper's cost is amortised over more code and worth
+	// revisiting.
+
 	/**
 	 * Identity of <em>this message</em>, unique and never reused — not even when a failed publish
 	 * is retried, since a republished message is a second delivery attempt and consumers must be
