@@ -3,6 +3,7 @@ package com.marketplace.events;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -148,4 +149,26 @@ class ContractRoundTripTest {
 		// upgrade from silently changing it.
 		assertThat(json).contains("\"occurredAt\":\"2026-08-22T09:15:30.123456789Z\"");
 	}
+
+	@Test
+	@DisplayName("ignores a field it has never heard of rather than failing")
+	void tolerates_an_unknown_field() throws Exception {
+		OrderCreated original = new OrderCreated(
+				MESSAGE_ID, ORDER_ID, OCCURRED_AT, VERSION,
+				ORDER_ID, USER_ID, SHOW_ID, SEAT_IDS, AMOUNT);
+
+		// Stands in for a newer producer that has added a field this build was never compiled
+		// against. Editing the parsed tree rather than splicing strings keeps the JSON valid, so a
+		// failure here means the tolerance is missing rather than the test's payload being malformed.
+		ObjectNode withExtraField = (ObjectNode) mapper.readTree(mapper.writeValueAsString(original));
+		withExtraField.put("promotionCode", "SUMMER2026");
+
+		OrderCreated restored = mapper.readValue(mapper.writeValueAsString(withExtraField), OrderCreated.class);
+
+		// Not merely "did not throw": the unknown field is dropped and every known field is
+		// unchanged, which is what makes an additive contract change safe to deploy without
+		// redeploying every consumer first (FR-007).
+		assertThat(restored).isEqualTo(original);
+	}
+
 }
