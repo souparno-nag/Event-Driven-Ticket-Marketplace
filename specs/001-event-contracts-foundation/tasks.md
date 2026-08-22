@@ -31,7 +31,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 
 **Purpose**: Repository skeleton and build root, so anything can compile.
 
-- [ ] T001 Create the directory skeleton `common-events/src/main/java/com/marketplace/events/`, `common-events/src/test/java/com/marketplace/events/`, and `infra/prometheus/` per plan.md
+- [x] T001 Create the directory skeleton `common-events/src/main/java/com/marketplace/events/`, `common-events/src/test/java/com/marketplace/events/`, and `infra/prometheus/` per plan.md
 - [ ] T002 Create the build root `pom.xml`: packaging `pom`, Java 21 release, `<modules>` listing `common-events`, and a `dependencyManagement` block importing the Spring Boot 3.3.x BOM plus pinned Jackson, JUnit 5, AssertJ, and Testcontainers versions (FR-019)
 - [ ] T003 Generate the Maven wrapper pinned to 3.9.9 by running `mvn wrapper:wrapper -Dmaven=3.9.9`, and commit `mvnw`, `mvnw.cmd`, and `.mvn/` (R12 — the installed Maven 3.6.3 sits on Spring Boot's exact floor)
 - [ ] T004 [P] Create `.gitignore` covering `target/`, `.idea/`, `*.iml`, `.DS_Store`, and `infra/data/`
