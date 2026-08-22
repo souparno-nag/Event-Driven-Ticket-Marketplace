@@ -153,6 +153,47 @@ services:
       retries: 10
       start_period: 10s
 
+  # ---------------------------------------------------------------------------------------------
+  # Redis — the seat locks. The authority on whether a seat is free, right now.
+  # ---------------------------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    profiles: ["core", "full"]
+    ports:
+      - "6379:6379"
+    command:
+      - redis-server
+      - --maxmemory
+      - 64mb
+      # THE most consequential line in this file. Redis's usual policy under memory pressure is to
+      # evict something old to make room — sensible for a cache, catastrophic here. An evicted key
+      # is a released seat lock, so a seat that is genuinely held silently becomes available and two
+      # customers buy it. Nothing reports an error; the data is simply gone.
+      #
+      # noeviction makes Redis REFUSE the write instead. A booking then fails loudly, which is a bad
+      # afternoon rather than a double-booked venue. When the failure modes are "reject a booking"
+      # and "sell one seat twice", you choose the first every time.
+      - --maxmemory-policy
+      - noeviction
+      # Snapshotting off. Seat locks carry a 120s TTL and are worthless after a restart — the
+      # durable record is the Postgres reservation, which is exactly why the design splits them.
+      # It also avoids the fork-to-save memory spike, which is a real hazard under a 96 MiB cap.
+      - --save
+      - ""
+    mem_limit: 96m
+    mem_reservation: 64m
+    memswap_limit: 96m
+    healthcheck:
+      # PING is genuinely a readiness check for Redis: it is single-threaded, so an answer means the
+      # server is free to serve. There is no equivalent of PostgreSQL's recovery phase where it
+      # would answer while unable to work.
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
 volumes:
   kafka-data:
   postgres-data:
