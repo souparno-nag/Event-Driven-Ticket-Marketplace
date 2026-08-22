@@ -8,7 +8,7 @@
 
 - [x] No implementation details (languages, frameworks, APIs)
 - [x] Focused on user value and business needs
-- [ ] Written for non-technical stakeholders
+- [x] Written for non-technical stakeholders
 - [x] All mandatory sections completed
 
 ## Requirement Completeness
@@ -33,14 +33,17 @@
 
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`
 
-### Known-unchecked item: "Written for non-technical stakeholders"
+### Accepted with qualification: "Written for non-technical stakeholders"
 
-Deliberately left unchecked and accepted as-is, rather than ticked optimistically or marked with
-a non-standard symbol that checklist tooling would not recognize. This is a developer-facing
-foundation feature: its deliverables are a shared contract library, a build root, and a local
-environment. The audience is genuinely the developer and the downstream service modules, and the
-spec says so explicitly in its opening paragraph rather than inventing an end-user framing that
-does not exist.
+Checked as a reviewer decision on 2026-08-22, not because the spec reads as non-technical prose,
+but because this criterion does not apply cleanly to this feature and the reviewer accepted it on
+that basis. The reasoning is recorded here so the tick is not mistaken for a claim the spec is
+approachable to a lay reader.
+
+This is a developer-facing foundation feature: its deliverables are a shared contract library, a
+build root, and a local environment. The audience is genuinely the developer and the downstream
+service modules, and the spec says so explicitly in its opening paragraph rather than inventing an
+end-user framing that does not exist.
 
 The spec does avoid naming concrete technologies throughout — backing components are described
 by role ("message broker", "relational database", "search index") rather than product name — so
@@ -49,7 +52,8 @@ non-technical readability, because concepts like message envelopes, saga correla
 versioning are the substance of the feature, not incidental jargon. No wording change fixes that
 without making the spec useless for planning.
 
-**Verdict**: acceptable as-is. No further iteration needed on this item.
+**Verdict**: accepted by the reviewer; the checklist gate is clear. No further iteration needed on
+this item, and it should not be re-raised on later features of the same kind.
 
 ### Deliberate additions beyond the original CLAUDE.md sketch
 
