@@ -194,6 +194,51 @@ services:
       retries: 5
       start_period: 5s
 
+  # ---------------------------------------------------------------------------------------------
+  # Elasticsearch — the CQRS read model. Not needed until build step 6, hence `full` only.
+  # ---------------------------------------------------------------------------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: elasticsearch
+    profiles: ["full"]
+    ports:
+      - "9200:9200"
+    environment:
+      # Skips the bootstrap checks a multi-node cluster runs, and stops it looking for peers that
+      # will never appear.
+      discovery.type: single-node
+      # No TLS and no authentication. Localhost-only demo data, and leaving security on would mean
+      # generating certificates before the first request — cost with no benefit at this scale.
+      xpack.security.enabled: "false"
+      # Two thirds of the container limit. Elasticsearch is unusually dependent on the memory it
+      # does NOT get: Lucene memory-maps index segments and reads them through the OS page cache,
+      # which lives outside the heap. A heap set near the limit starves the file cache and makes
+      # search slower, not faster (R10).
+      ES_JAVA_OPTS: -Xms640m -Xmx640m
+      # Locking heap into RAM needs a memlock ulimit this compose file does not grant; asking for it
+      # anyway makes the node refuse to start rather than degrade.
+      bootstrap.memory_lock: "false"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    mem_limit: 1g
+    mem_reservation: 768m
+    memswap_limit: 1g
+    healthcheck:
+      # ACCEPTS YELLOW. A single-node cluster assigns every primary shard and then cannot place a
+      # single replica, because a replica on the same node would defend against nothing. So its
+      # steady state is yellow — "all data available, no redundancy" — and it never reaches green.
+      #
+      # Insisting on green here is a classic single-node trap: startup hangs forever waiting for a
+      # state that cannot occur, and the logs show a perfectly healthy cluster (R8).
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 15s
+      timeout: 10s
+      # The slowest component to come up: a JVM start plus index recovery. quickstart.md calls it
+      # out as the long pole under the `full` profile.
+      retries: 20
+      start_period: 60s
+
 volumes:
   kafka-data:
   postgres-data:
+  elasticsearch-data:
