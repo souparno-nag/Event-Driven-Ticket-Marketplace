@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<!--
+	  WHY inheriting the aggregator matters here, and why it is safe:
+	  the parent chain reaches spring-boot-starter-parent, which supplies
+	  <dependencyManagement> — version pins for roughly 400 libraries. Pins place
+	  NOTHING on the classpath; only <dependencies> below do that. So this module gets
+	  Jackson and JUnit versions Spring Boot tested together, while carrying no Spring
+	  classes at all. That is what makes FR-010 true by construction rather than by
+	  remembering to check.
+
+	  This module is deliberately NOT generated from Spring Initializr (see research.md
+	  R14). Initializr always emits a Boot application — a starter dependency, a
+	  @SpringBootApplication class, and spring-boot-maven-plugin. All three would have to
+	  be deleted, and the plugin in particular repackages the jar into an executable fat
+	  jar, which is wrong for a library other modules depend on.
+	-->
+	<parent>
+		<groupId>com.marketplace</groupId>
+		<artifactId>ticket-marketplace</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+	</parent>
+
+	<artifactId>common-events</artifactId>
+	<name>common-events</name>
+	<description>Shared saga message contracts. No framework dependencies.</description>
+
+	<dependencies>
+		<!--
+		  The ONLY compile-scope dependency. jackson-annotations is annotations alone —
+		  no serializer, no parser. It lets a record carry hints such as @JsonProperty for
+		  whichever service does the serializing.
+
+		  TRADEOFF: the full jackson-databind could have gone here instead, letting this
+		  module serialize on its own. Rejected because a contract module should describe
+		  the shape of a message, not decide how it is written to the wire. Every consumer
+		  already has a configured ObjectMapper, and forcing databind on all of them
+		  removes their ability to configure it differently.
+		-->
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-annotations</artifactId>
+		</dependency>
+
+		<!--
+		  Test scope means these are on the classpath while tests compile and run, and are
+		  absent from anything that depends on this module. So the round-trip tests can use
+		  a real ObjectMapper without pushing databind onto every service.
+		-->
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>com.fasterxml.jackson.datatype</groupId>
+			<artifactId>jackson-datatype-jsr310</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+		  WHY jsr310 is not optional: without it Jackson does not understand java.time
+		  types and serializes an Instant as an object of internal fields rather than an
+		  ISO-8601 string. Round-trip equality then fails in a way that looks like a bug in
+		  the record.
+		-->
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.assertj</groupId>
+			<artifactId>assertj-core</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<!--
+	  No <build> section, and specifically no spring-boot-maven-plugin. This module builds
+	  to an ordinary jar that other modules put on their classpath. The compiler settings
+	  and Java 21 release come from the parent.
+	-->
+
+</project>
