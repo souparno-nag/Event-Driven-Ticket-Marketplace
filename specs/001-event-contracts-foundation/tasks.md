@@ -79,7 +79,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T019 [P] [US1] Create `OrderCreated.java` — record of the four envelope components plus `orderId`, `userId`, `showId`, `seatIds`, `amount`; compact constructor validating and copying `seatIds` into an unmodifiable list; implements `SagaEvent`
 - [x] T020 [P] [US1] Create `SeatsReserved.java` — envelope plus `orderId`, `seatIds`, `reservationId`, `lockExpiresAt`; compact constructor additionally asserting `lockExpiresAt` is strictly after `occurredAt`. WHY comment explaining the fencing purpose (FR-008)
 - [x] T021 [P] [US1] Create `SeatsRejected.java` — envelope plus `orderId`, `seatIds`, `reason`
-- [ ] T022 [P] [US1] Create `PaymentSucceeded.java` — envelope plus `orderId`, `paymentId`, `amount`
+- [x] T022 [P] [US1] Create `PaymentSucceeded.java` — envelope plus `orderId`, `paymentId`, `amount`
 - [ ] T023 [P] [US1] Create `PaymentFailed.java` — envelope plus `orderId`, `reason`
 - [ ] T024 [P] [US1] Create `OrderConfirmed.java` — envelope plus `orderId`, `seatIds`
 - [ ] T025 [P] [US1] Create `OrderCancelled.java` — envelope plus `orderId`, `reason`
