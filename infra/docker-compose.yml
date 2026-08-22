@@ -238,6 +238,36 @@ services:
       retries: 20
       start_period: 60s
 
+  # ---------------------------------------------------------------------------------------------
+  # Zipkin — distributed tracing. Where a saga becomes one picture instead of six log files.
+  # ---------------------------------------------------------------------------------------------
+  zipkin:
+    image: openzipkin/zipkin:3.6.1
+    container_name: zipkin
+    profiles: ["obs", "full"]
+    ports:
+      - "9411:9411"
+    environment:
+      # In-memory storage. Traces are lost on restart, which is right for a demo: they are
+      # diagnostic breadcrumbs, not records, and the alternative is running a storage backend to
+      # keep data nobody reads twice.
+      STORAGE_TYPE: mem
+      # MaxRAMPercentage rather than a fixed -Xmx. The JVM reads the cgroup limit, so one setting
+      # stays correct if mem_limit changes — but the default is 25%, which would leave a 64 MiB heap
+      # in a 256 MiB container. 65% is the explicit override (R10).
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=65
+    mem_limit: 256m
+    mem_reservation: 128m
+    memswap_limit: 256m
+    healthcheck:
+      # wget rather than curl: this image is Alpine-based, so busybox wget is present and curl is
+      # not. --spider fetches headers only, which is all a health probe needs.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9411/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
 volumes:
   kafka-data:
   postgres-data:
