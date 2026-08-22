@@ -355,6 +355,45 @@ restriction is scoped to the actual failure mode rather than banning the library
 
 ---
 
+## R14. Project scaffolding from Spring Initializr
+
+**Decision**: Every Spring Boot module is generated from start.spring.io by the developer.
+`common-events` is the single exception and is hand-written as a plain library.
+
+**Rationale**: Initializr produces the correct Boot parent, a matching wrapper, and starter
+versions known to work together, which removes a class of version-mismatch problems that are
+tedious to diagnose by hand. Generating it is first-time scaffolding, so under Constitution
+Principle V the developer runs it and the configuration to select is handed to them rather than
+fetched automatically.
+
+`common-events` is excluded because Initializr always emits a Boot *application*: a
+`spring-boot-starter` dependency, a `@SpringBootApplication` class, a context-load test, and the
+`spring-boot-maven-plugin`. Using it here would mean deleting four things to get back to a plain
+library, and the plugin is a genuine hazard — it repackages the jar into an executable fat jar with
+a custom classloader, which is correct for an application and wrong for a library other modules
+depend on. Leaving it in produces a dependency whose classes are not where Maven expects them.
+Missing the starter instead would fail FR-010 and its `dependency:tree` check.
+
+**The distinction that resolves the apparent conflict**: inheriting `spring-boot-starter-parent`
+is not the same as depending on Spring. The parent contributes `dependencyManagement`, which pins
+versions only and places nothing on the classpath; only entries in `<dependencies>` do that. So
+`common-events` inherits the aggregator — and through it, Boot's curated Jackson versions — while
+keeping zero Spring classes on its classpath. FR-010 holds by construction.
+
+**Alternatives considered**:
+- *Generate `common-events` from Initializr and strip it down*: four deletions, each of which can
+  be forgotten, in exchange for nothing the hand-written twenty-five lines do not already provide.
+- *Hand-write every POM including the services*: loses Initializr's curated starter combinations
+  for the six Boot applications built from step 2 onward, which is where it genuinely earns its
+  place.
+
+**Consequence for the aggregator**: Initializr generates single projects, not multi-module
+aggregators. The generated project is therefore adapted — packaging switched to `pom`, `<modules>`
+added, generated `src/` and application class deleted — with its wrapper kept, which also
+supersedes the installed Maven 3.6.3 (R12) without a separate `mvn wrapper:wrapper` run.
+
+---
+
 ## Resolved unknowns
 
 Every item flagged in Technical Context is now resolved. No `NEEDS CLARIFICATION` markers remain.

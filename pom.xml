@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<!--
+	  WHY inherit spring-boot-starter-parent when this project is not a Spring Boot app:
+	  the parent contributes dependencyManagement only, which pins versions for roughly
+	  400 common libraries (Jackson, JUnit, AssertJ, Testcontainers, the Kafka client).
+	  Version pinning puts NOTHING on the classpath — only entries in <dependencies> do
+	  that. So common-events can inherit this and still carry zero Spring classes, which
+	  is what keeps FR-010 true by construction rather than by vigilance.
+
+	  WHY 3.3.13 rather than the 4.0.8 the generator produced: Spring Cloud release trains
+	  are pinned to a Boot generation, and Eureka plus Gateway arrive at build step 7.
+	  Spring Cloud 2023.0.x is a known-good pairing with Boot 3.3. Version 3.3.13 is the
+	  final 3.3.x patch, verified against Maven Central.
+
+	  TRADEOFF: 3.3.x is past its OSS support window, so it receives no further security
+	  patches. Rejected staying on Boot 4.x because the matching Spring Cloud train would
+	  be unverified here, and a Boot/Cloud mismatch fails at runtime with obscure
+	  NoSuchMethodError and bean-creation errors. This stack is local-only and never
+	  internet-facing, so the missing patches carry no practical exposure.
+	-->
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>3.3.13</version>
+		<relativePath/> <!-- WHY empty: resolve the parent from the repository, not from a parent directory -->
+	</parent>
+
+	<groupId>com.marketplace</groupId>
+	<artifactId>ticket-marketplace</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+
+	<!--
+	  WHY packaging is `pom` and not `jar`: this module produces no code of its own. It is
+	  an aggregator — it lists the modules to build and the versions they share. Maven
+	  builds the listed modules in dependency order from a single command at this level.
+	-->
+	<packaging>pom</packaging>
+
+	<name>ticket-marketplace</name>
+	<description>Event-driven ticket marketplace demonstrating a choreography-based saga over Kafka</description>
+
+	<properties>
+		<java.version>21</java.version>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+	</properties>
+
+	<!--
+	  Adding a service later is one line here plus that module's own pom.xml, and nothing
+	  else. Steps 2 onward append order-service, inventory-service, payment-service,
+	  projection-service, api-gateway, auth-service, and eureka-server.
+	-->
+	<modules>
+		<module>common-events</module>
+	</modules>
+
+	<!--
+	  WHY there are no <dependencies> and no spring-boot-maven-plugin here:
+	  the generated project carried spring-boot-starter, spring-boot-starter-test, and the
+	  Boot plugin because it was scaffolded as a runnable application. Both were removed.
+
+	  A dependency declared at this level would be inherited by EVERY module, including
+	  common-events, which must stay framework-free. And spring-boot-maven-plugin
+	  repackages a jar into an executable fat jar with a custom classloader — correct for
+	  an application, wrong for a library other modules depend on. Each service module
+	  declares the plugin for itself instead.
+	-->
+
+</project>
