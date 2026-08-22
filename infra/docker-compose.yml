@@ -18,6 +18,44 @@
 
 name: ticket-marketplace
 
+# -------------------------------------------------------------------------------------------------
+# STARTUP ORDERING (FR-013)
+#
+# FR-013 requires that a component with an ordering dependency waits for that dependency to report
+# healthy. Of the six services below, NONE has one. That is a finding, not an omission, so it is
+# recorded here rather than left as an absence a later reader mistakes for an oversight:
+#
+#   kafka, postgres, redis, elasticsearch   standalone backing stores; nothing to wait for
+#   zipkin                                  STORAGE_TYPE=mem, so it owns its storage. Point it at
+#                                           Elasticsearch instead and it WOULD need an edge
+#   prometheus                              pull model. A scrape target that is down is a normal
+#                                           reported condition, not a startup failure — surviving
+#                                           targets that come and go is the whole design
+#
+# The environment's one genuine ordering dependency arrives with the topic provisioner in T045,
+# which cannot create channels before the broker serves metadata.
+#
+# WHY the edges are not added speculatively anyway: a depends_on edge is not free, and its cost is
+# not visible in the line that declares it. Verified against Compose v2.39.1 — if a service is
+# active and a service it depends on is NOT enabled by any active profile, Compose rejects the
+# ENTIRE project:
+#
+#   service "x" depends on undefined service "y": invalid compose project
+#
+# It does not auto-enable the dependency. So every edge silently couples two profiles, and each
+# dependency's profile list must be a SUPERSET of its dependent's. Concretely: giving zipkin
+# (obs, full) an edge to elasticsearch (full) would make `COMPOSE_PROFILES=obs` start nothing at
+# all, with an error naming Elasticsearch — which nobody running the observability profile is
+# thinking about. T045's kafka-init is safe because it shares kafka's exact tags, core and full.
+#
+# TRADEOFF: these six could be chained with depends_on to stagger startup and flatten the memory
+# spike of everything booting at once under `full`. Rejected — that turns a memory-budget problem
+# into a startup-latency one, serialising a boot that parallelises perfectly well, and the honest
+# controls for memory are the per-container limits already set below. It would also leave a graph
+# that no longer describes real dependencies, so the next reader could not trust the ones that are
+# real. Startup waits for health at the command instead, via `up --wait` in the Makefile (T039).
+# -------------------------------------------------------------------------------------------------
+
 services:
 
   # ---------------------------------------------------------------------------------------------
