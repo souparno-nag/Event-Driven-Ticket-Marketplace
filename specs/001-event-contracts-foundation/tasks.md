@@ -37,7 +37,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T004 [P] Move the generated `mvnw`, `mvnw.cmd`, and `.mvn/` to the repository root and verify `./mvnw -version` reports Maven 3.9.x, superseding the installed 3.6.3 (R12). No `mvn wrapper:wrapper` run is needed — Initializr bundles the wrapper
 - [x] T005 [P] Create `.gitignore` covering `target/`, `.idea/`, `*.iml`, `.DS_Store`, and `infra/data/`
 - [x] T006 [P] Hand-write `common-events/pom.xml`: inherit the aggregator parent, declare `jackson-annotations` at compile scope, and `jackson-databind`, `jackson-datatype-jsr310`, JUnit 5, and AssertJ at test scope. **Not** generated from Initializr — see R14. Add a WHY comment recording that inheriting the parent supplies version pinning only, and puts no Spring classes on the classpath (FR-010, R1, R13, R14)
-- [ ] T007 Verify the skeleton builds: `./mvnw clean verify` succeeds with an empty `common-events` module
+- [x] T007 Verify the skeleton builds: `./mvnw clean verify` succeeds with an empty `common-events` module
 
 **Checkpoint**: Build root compiles. No contracts yet.
 
