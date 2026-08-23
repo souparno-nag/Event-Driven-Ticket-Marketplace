@@ -138,7 +138,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T052 [P] Review each JSON schema in `specs/001-event-contracts-foundation/contracts/` field-for-field against its record. There is no registry enforcing this, so it is a manual gate (contracts/README.md)
+- [x] T052 [P] Review each JSON schema in `specs/001-event-contracts-foundation/contracts/` field-for-field against its record. There is no registry enforcing this, so it is a manual gate (contracts/README.md)
 - [ ] T053 [P] Create the repository `README.md` — what the project is, prerequisites, `make up` quickstart, profile table, and a link to the spec directory. The full saga diagram and rationale sections arrive at build step 11
 - [ ] T054 [P] Add a `TRADEOFF:` comment in `infra/docker-compose.yml` recording replication factor 1 as a single-broker local constraint, not a production topology (R6)
 - [ ] T055 Confirm every non-obvious line carries a WHY comment rather than a WHAT comment, per the project constraints

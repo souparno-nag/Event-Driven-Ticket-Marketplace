@@ -252,7 +252,10 @@ class OrderingGuaranteeIT {
 						sagaId,
 						UUID.randomUUID(),
 						UUID.randomUUID(),
-						List.of("A-" + sequence),
+						// Matches the seatIds pattern in order-created.schema.json, ^[A-Z]+[0-9]+$.
+						// "A-0" would not, and test data that contradicts the published contract is a
+						// small lie that later gets copied into something that does validate (T052).
+						List.of("A" + sequence),
 						new BigDecimal("42.00"));
 				messages.add(message);
 				ids.add(message.messageId());
