@@ -65,7 +65,7 @@ Multi-module Maven project, build root at the repository root. This step adds on
 - [X] T069 [P] Create `order-service/src/main/java/com/marketplace/orders/outbox/OutboxRepository.java` — Spring Data `JpaRepository<OutboxRecord, Long>`. The claim query is added in US2, not here
 - [X] T070 [P] Create `order-service/src/main/java/com/marketplace/orders/config/JacksonConfig.java` — an `ObjectMapper` bean with `JavaTimeModule`, `WRITE_DATES_AS_TIMESTAMPS` disabled, `WRITE_BIGDECIMAL_AS_PLAIN` enabled, `FAIL_ON_UNKNOWN_PROPERTIES` disabled. WHY comment: without plain BigDecimal a two-decimal amount serializes as `1E+2`, which the step-1 schema rejects — and the failure surfaces in a consumer, not here (R7)
 - [X] T071 Create `order-service/src/test/java/com/marketplace/orders/PostgresIT.java` — an abstract Testcontainers base starting PostgreSQL 16 only, with `@DynamicPropertySource` wiring the datasource. Deliberately no Kafka: User Story 1 must be testable without a broker
-- [ ] T072 Verify Flyway applies cleanly: run any test extending `PostgresIT` and confirm both migrations execute and `ddl-auto: validate` raises no mismatch against the entities (FR-023, SC-011)
+- [X] T072 Verify Flyway applies cleanly: run any test extending `PostgresIT` and confirm both migrations execute and `ddl-auto: validate` raises no mismatch against the entities (FR-023, SC-011)
 
 **Checkpoint**: Schema and entities exist and agree with each other. All three stories unblocked.
 
