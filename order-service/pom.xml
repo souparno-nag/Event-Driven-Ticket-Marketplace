@@ -124,6 +124,23 @@
 		</dependency>
 
 		<!--
+		  Cuts the getters off the entities. Deliberately NOT @Data, @EqualsAndHashCode or
+		  @ToString on a JPA entity: the generated equals/hashCode fold in the identifier, so
+		  an entity's hash code CHANGES after persist and silently corrupts any hash-based
+		  collection already holding it, and the generated toString walks lazy associations,
+		  producing surprise queries or LazyInitializationException. @Getter and @Setter carry
+		  none of that risk.
+
+		  `optional` stops Lombok leaking onto the classpath of anything that depends on this
+		  module. It is a compile-time code generator; nothing needs it at runtime.
+		-->
+		<dependency>
+			<groupId>org.projectlombok</groupId>
+			<artifactId>lombok</artifactId>
+			<optional>true</optional>
+		</dependency>
+
+		<!--
 		  Boot 4 splits testing into per-slice starters (spring-boot-starter-web-test and
 		  friends). On 3.3 there is one starter carrying JUnit 5, AssertJ, Mockito and
 		  the Spring test context.
