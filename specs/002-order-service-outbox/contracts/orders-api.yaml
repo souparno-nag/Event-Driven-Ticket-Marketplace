@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: Order Service API
+  version: 1.0.0
+  description: |
+    The front door of the marketplace. Accepts a booking request, records it durably together with
+    the message announcing it, and reports the current state of an order.
+
+    Acceptance is not a booking. A 202 means the request has been recorded and the saga will run;
+    whether seats are actually held is decided by inventory-service and reported through the order's
+    status. Callers learn the outcome by polling GET /api/orders/{orderId}.
+
+    No authentication is enforced at this step. `userId` is supplied in the request body and taken on
+    trust. From build step 7 the gateway validates a bearer token and these paths sit behind it
+    unchanged.
+
+servers:
+  - url: http://localhost:8081
+    description: Local development
+
+paths:
+  /api/orders:
+    post:
+      summary: Submit a booking request
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '202':
+          description: |
+            Accepted for processing. The order and its outbox row are committed. The saga has not run.
+          headers:
+            Location:
+              description: Where to poll for this order's state
+              schema: { type: string, format: uri-reference }
+              example: /api/orders/9f1c2b7e-4a3d-4c1e-8f2a-0b6d5e4c3a21
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateOrderResponse' }
+        '400':
+          description: The request is malformed. Nothing was recorded.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: https://ticket-marketplace/problems/validation-failed
+                title: Validation failed
+                status: 400
+                detail: seatIds must not contain duplicates
+                field: seatIds
+        '503':
+          description: |
+            The service is at capacity or its store is not responding within the allowed time.
+            Nothing was recorded and retrying is appropriate. Distinct from 400 (the request is fine)
+            and from 500 (something is broken).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema: { type: integer }
+              example: 1
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              example:
+                type: https://ticket-marketplace/problems/capacity-exceeded
+                title: Service busy
+                status: 503
+                detail: No capacity to record this request; retry shortly
+
+  /api/orders/{orderId}:
+    get:
+      summary: Read the current state of an order
+      operationId: getOrder
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The order as currently recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderView' }
+        '400':
+          description: The identifier is not a well-formed UUID
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404':
+          description: No order exists with that identifier
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+components:
+  schemas:
+
+    CreateOrderRequest:
+      type: object
+      required: [userId, showId, seatIds, amount]
+      additionalProperties: false
+      properties:
+        userId:
+          type: string
+          format: uuid
+        showId:
+          type: string
+          format: uuid
+          description: The concert being ticketed. Never an event/message identifier.
+        seatIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, maxLength: 32 }
+          description: Seat labels, unique within the show. All-or-nothing — reserved together or not at all.
+          example: ["A1", "A2"]
+        amount:
+          type: string
+          pattern: '^\d+\.\d{2}$'
+          description: |
+            Total to charge, exactly two decimal places, as a JSON string so no parser can turn it
+            into a binary float. Never negative.
+          example: "150.00"
+
+    CreateOrderResponse:
+      type: object
+      required: [orderId, status]
+      properties:
+        orderId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [PENDING]
+          description: Always PENDING here. Acceptance is not a booking.
+
+    OrderView:
+      type: object
+      required: [orderId, userId, showId, seatIds, amount, status, createdAt, updatedAt]
+      properties:
+        orderId: { type: string, format: uuid }
+        userId:  { type: string, format: uuid }
+        showId:  { type: string, format: uuid }
+        seatIds:
+          type: array
+          items: { type: string }
+        amount:  { type: string, pattern: '^\d+\.\d{2}$' }
+        status:
+          type: string
+          enum: [PENDING, CONFIRMED, CANCELLED]
+          description: Only PENDING is reachable until build step 4.
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Problem:
+      description: RFC 7807 problem details. `type` is stable and machine-comparable.
+      type: object
+      required: [type, title, status]
+      properties:
+        type:   { type: string, format: uri }
+        title:  { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        field:
+          type: string
+          description: Present on validation failures — names the offending field (FR-005).
