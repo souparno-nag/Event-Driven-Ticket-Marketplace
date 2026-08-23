@@ -47,6 +47,27 @@
 	<properties>
 		<java.version>21</java.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+
+		<!--
+		  Docker Engine 29 removed support for API versions below 1.40, and the docker-java client
+		  Testcontainers uses still negotiates 1.32 by default. The result is a hard failure before
+		  any container starts:
+
+		    client version 1.32 is too old. Minimum supported API version is 1.40
+
+		  Testcontainers reports that as "Could not find a valid Docker environment", which reads
+		  like a missing daemon rather than a version mismatch — so the cause is recorded here.
+
+		  WHY 1.40 rather than something newer: it is exactly the minimum Docker 29 accepts, and it
+		  has been supported since Docker 19.03, so this one value works on both very new and quite
+		  old engines. A higher number would fix this machine and break an older one.
+
+		  Passed to the test JVM as the `api.version` system property, which is the name docker-java
+		  reads. The DOCKER_API_VERSION environment variable does NOT work — verified; docker-java
+		  ignores it and the 1.32 failure persists.
+		-->
+		<docker.api.version>1.40</docker.api.version>
 	</properties>
 
 	<!--

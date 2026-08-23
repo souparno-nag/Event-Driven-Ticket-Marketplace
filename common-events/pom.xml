@@ -78,12 +78,70 @@
 			<artifactId>assertj-core</artifactId>
 			<scope>test</scope>
 		</dependency>
+
+		<!--
+		  For OrderingGuaranteeIT, which proves the per-order ordering guarantee against a real
+		  broker rather than a mock. All three are test scope, so nothing that depends on this
+		  module inherits a Kafka client or a container library — FR-010 is unaffected, and
+		  Scenario 2's dependency-tree check still shows no framework on the compile path.
+
+		  WHY a real broker rather than a mock: the thing under test IS broker behaviour. Keying,
+		  partition assignment, and per-partition ordering are properties of Kafka, not of this
+		  code, so a mock would only assert that the test's own fake behaves as the test expects.
+		-->
+		<dependency>
+			<groupId>org.apache.kafka</groupId>
+			<artifactId>kafka-clients</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>kafka</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+		  Testcontainers and the Kafka client both log through SLF4J. Without a binding they print
+		  a warning and discard everything, which hides the container startup diagnostics that make
+		  a failing integration test diagnosable.
+		-->
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-simple</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<!--
-	  No <build> section, and specifically no spring-boot-maven-plugin. This module builds
-	  to an ordinary jar that other modules put on their classpath. The compiler settings
-	  and Java 21 release come from the parent.
+	  Still no spring-boot-maven-plugin. This module builds to an ordinary jar that other modules
+	  put on their classpath; the compiler settings and Java 21 release come from the parent.
+
+	  The one thing configured here is the Docker API version the Testcontainers client negotiates,
+	  passed to the test JVM. See ${docker.api.version} in the root pom for why it is needed at all
+	  — without it, any Testcontainers test fails on a Docker 29 engine before starting a container.
+
+	  Surefire does not run OrderingGuaranteeIT during a normal build; the *IT suffix is Failsafe's
+	  convention and T049 binds it to the verify phase. This configuration is what lets a developer
+	  run it on its own — `./mvnw -pl common-events test -Dtest=OrderingGuaranteeIT` — without having
+	  to know about the flag.
 	-->
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<systemPropertyVariables>
+						<api.version>${docker.api.version}</api.version>
+					</systemPropertyVariables>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
 
 </project>
