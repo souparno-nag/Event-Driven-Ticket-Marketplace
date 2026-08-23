@@ -107,7 +107,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T036 [P] [US2] Create `infra/prometheus/prometheus.yml` with a minimal global scrape config and no targets yet (service targets arrive at step 8)
 - [x] T037 [US2] Create `infra/.env` containing `COMPOSE_PROFILES=core` with a comment listing the valid values `core | obs | full` and their approximate footprints (R11)
 - [x] T038 [US2] Add `depends_on` with `condition: service_healthy` wherever ordering matters, so no dependent starts before its dependency is serving (FR-013)
-- [ ] T039 [US2] Create `Makefile` with targets `up` (compose up -d honouring `COMPOSE_PROFILES`), `down` (compose down **-v**, removing volumes for a clean reset), `build` (`./mvnw clean verify`), and `logs`
+- [x] T039 [US2] Create `Makefile` with targets `up` (compose up -d honouring `COMPOSE_PROFILES`), `down` (compose down **-v**, removing volumes for a clean reset), `build` (`./mvnw clean verify`), and `logs`
 - [ ] T040 [US2] Add the `health` target to `Makefile` — prints one line per component **derived from the active profile**, not a hardcoded list of seven. A hardcoded list reports false failures under `core` (FR-016, R11 consequence)
 - [ ] T041 [US2] Create `infra/README.md` documenting the profile table with footprints, the per-component memory budget, the port map, and the exit-code-137 OOM diagnostic (FR-017)
 - [ ] T042 [US2] Verify Scenario 3: `make up && make health` reaches full health under `core`, then repeat once under `COMPOSE_PROFILES=full` to validate SC-001 and SC-002 against the complete environment. Note `full` is **six** services, not seven — Eureka is deferred to step 7 (T033)
