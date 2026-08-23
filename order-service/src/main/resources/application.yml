@@ -27,6 +27,15 @@ spring:
       # the requests that WERE admitted stay inside their latency budget (FR-036, SC-016).
       connection-timeout: 250
 
+      # Companion to the timeouts above, enforced by the DATABASE rather than the application. Runs
+      # once per physical connection when Hikari creates it, setting a per-session PostgreSQL GUC.
+      # WHY this matters beyond the 3s @Transactional timeout below: that timeout only starts a clock
+      # once a connection has been handed to the transaction; a query that hangs INSIDE a query the
+      # database itself is stuck on (a lock wait, a runaway plan) is exactly what a client-side
+      # timeout cannot reliably interrupt, because the client is still waiting on the same socket. A
+      # database-enforced statement_timeout cuts the query off at its source (FR-035, R5).
+      connection-init-sql: SET statement_timeout = 3000
+
   jpa:
     hibernate:
       # Flyway owns the schema; Hibernate is only allowed to check that the tables it finds
