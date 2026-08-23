@@ -1,0 +1,110 @@
+# order-service configuration.
+#
+# Values here are for LOCAL DEVELOPMENT against the Docker Compose environment in infra/.
+# Nothing in this file is a secret: the database credentials are the committed local-only pair
+# from build step 1, reachable from localhost alone and holding nothing but generated demo data.
+
+spring:
+  application:
+    name: order-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/marketplace
+    username: marketplace
+    password: marketplace
+
+    hikari:
+      # THE ADMISSION CONTROL for this service, and the reason it is here rather than in a
+      # rate limiter. Every accepted booking needs a connection for its transaction, so the
+      # pool IS the bottleneck on the write path; making it the explicit bound means one
+      # mechanism governs admission instead of two that can disagree (R5, FR-035).
+      maximum-pool-size: 20
+
+      # WHY 250ms and not the 30s default: when the pool is exhausted a caller waits here.
+      # The default turns a burst into a wall of requests all timing out together, which is
+      # exactly the failure the capacity clarification ruled out. A quarter of a second
+      # absorbs ordinary jitter and then gives up, so the request is refused with 503 while
+      # the requests that WERE admitted stay inside their latency budget (FR-036, SC-016).
+      connection-timeout: 250
+
+  jpa:
+    hibernate:
+      # Flyway owns the schema; Hibernate is only allowed to check that the tables it finds
+      # match the entities and then fail loudly if they do not. `update` would let Hibernate
+      # silently alter a production table on startup, and `create-drop` would delete it.
+      # `validate` is what makes a forgotten migration a startup failure instead of a
+      # mystery at runtime (FR-023, R8).
+      ddl-auto: validate
+    properties:
+      hibernate:
+        # Log SQL readably when debugging. Off by default via the logging level below.
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  transaction:
+    # Companion to the pool timeout above: bounds how long a transaction may hold its
+    # connection. Without it a slow query keeps a connection out of the pool indefinitely and
+    # the 250ms admission bound above protects nothing (R5, FR-035).
+    default-timeout: 3s
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    # Producer specifics -- acks, idempotence, serializers -- are set in code in T095, not
+    # here. They are correctness requirements rather than environment settings, and a value
+    # that must never be changed does not belong in a file whose purpose is to be changed.
+
+# The outbox relay. Every value is referenced by name from OutboxRelay, so changing the poll
+# interval in a test does not require touching code (contracts/outbox-relay.md).
+outbox:
+  relay:
+    # Fixed DELAY, not fixed rate: measured from the end of one run to the start of the next,
+    # so a slow run can never overlap the one behind it. Sets the floor for SC-004's
+    # two-second budget between commit and the message reaching its channel.
+    poll-interval-ms: 500
+
+    # Rows claimed per run (FR-015). Bounds the transaction, so a long channel outage drains
+    # across many runs rather than becoming one enormous unit of work.
+    batch-size: 100
+
+    # Failed sends before a row is parked and stops being retried (FR-029). Five is enough to
+    # ride out a broker restart and few enough that a genuinely unsendable row is set aside
+    # quickly rather than spinning forever.
+    max-attempts: 5
+
+server:
+  # 8080 is deliberately left free for the API gateway in build step 7.
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Deliberately narrow. Actuator exposes a great deal by default; only these three are
+        # needed, and an endpoint nobody uses is only an endpoint nobody is watching.
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      # Trace EVERY request. Correct here and wrong in production: this is a demonstration
+      # where a missing trace defeats the point, and the volume is a developer's own traffic.
+      # A real deployment samples a small percentage.
+      probability: 1.0
+  zipkin:
+    tracing:
+      # Where finished traces are sent. Zipkin lives in the `obs` Compose profile, so with the
+      # default `core` profile this endpoint is unreachable and the reporter logs a warning.
+      # That is harmless: trace context is still created and still stored on each outbox row,
+      # which is what carries a trace across the outbox gap. Only the VIEWING of traces needs
+      # Zipkin running -- set COMPOSE_PROFILES=core,obs for that (R4).
+      endpoint: http://localhost:9411/api/v2/spans
+
+logging:
+  level:
+    # The relay logs one line per batch at DEBUG. Raise this when a message is not arriving
+    # and you need to see whether the relay claimed the row at all.
+    com.marketplace.orders: INFO
