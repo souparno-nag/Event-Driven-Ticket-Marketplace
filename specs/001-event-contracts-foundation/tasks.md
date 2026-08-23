@@ -111,7 +111,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T040 [US2] Add the `health` target to `Makefile` — prints one line per component **derived from the active profile**, not a hardcoded list of seven. A hardcoded list reports false failures under `core` (FR-016, R11 consequence)
 - [x] T041 [US2] Create `infra/README.md` documenting the profile table with footprints, the per-component memory budget, the port map, and the exit-code-137 OOM diagnostic (FR-017)
 - [ ] T042 [US2] Verify Scenario 3: `make up && make health` reaches full health under `core`, then repeat once under `COMPOSE_PROFILES=full` to validate SC-001 and SC-002 against the complete environment. Note `full` is **six** services, not seven — Eureka is deferred to step 7 (T033)
-- [ ] T043 [US2] Verify Scenario 4: run ten consecutive `make down` / `make up` cycles, all reaching healthy (SC-005, FR-015)
+- [x] T043 [US2] Verify Scenario 4: run ten consecutive `make down` / `make up` cycles, all reaching healthy (SC-005, FR-015)
 
 **Checkpoint**: Environment reproducible. US1 and US2 both shippable.
 
