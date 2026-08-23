@@ -77,6 +77,7 @@
 	-->
 	<modules>
 		<module>common-events</module>
+		<module>order-service</module>
 	</modules>
 
 	<!--
