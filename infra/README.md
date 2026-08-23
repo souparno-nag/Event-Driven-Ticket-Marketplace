@@ -11,7 +11,10 @@ make logs     # follow all logs (make logs SERVICE=kafka for one)
 make down     # stop and delete data — a clean reset
 ```
 
-`make up` returns only once every health check passes, or fails after five minutes.
+`make up` returns only once every health check passes, or fails after five minutes. It then
+provisions the fourteen message channels — seven message types, each paired with a dead-letter
+channel — via a one-shot job that exits when done. Channel creation is idempotent, so running
+`make up` against an environment that already has them succeeds and changes nothing.
 
 ---
 
@@ -231,6 +234,7 @@ make up
 | File | Purpose |
 |---|---|
 | `docker-compose.yml` | all six component definitions, limits, and health checks |
+| `kafka-init/create-topics.sh` | creates the fourteen message channels; run by `make up` |
 | `.env` | `COMPOSE_PROFILES` — which components `make up` starts |
 | `prometheus/prometheus.yml` | scrape configuration |
 | `README.md` | this file |

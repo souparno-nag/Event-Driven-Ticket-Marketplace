@@ -375,6 +375,76 @@ services:
       retries: 5
       start_period: 10s
 
+  # ---------------------------------------------------------------------------------------------
+  # kafka-init — creates the fourteen message channels, then exits. Not a component; a job.
+  # ---------------------------------------------------------------------------------------------
+  kafka-init:
+    # The broker's own image, reused rather than adding a smaller one. It already carries the
+    # kafka-topics CLI and is guaranteed to be version-matched to the broker, and it is cached
+    # locally by the time this runs — so reuse costs nothing and a second image would.
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: kafka-init
+
+    # PROFILE "init", NOT "core"/"full", and this is the one place the plan was deviated from.
+    #
+    # `make up` passes `--wait`, which blocks until every started container is healthy. A container
+    # that EXITS is neither running nor healthy, and Compose cannot tell "finished its job" from
+    # "died" — so `--wait` fails the whole command even on exit code 0. Measured against Compose
+    # v2.39.1:
+    #
+    #     container probe-init-1 exited (0)
+    #     EXIT=1
+    #
+    # Tagged core/full, this job would therefore make every single `make up` report failure after a
+    # completely successful startup. Out of those profiles, `up --wait` never sees it, and `make up`
+    # invokes it explicitly afterwards with `compose run`, which DOES propagate its exit code
+    # (verified: a job exiting 3 makes the command exit 3). So provisioning still fails loudly.
+    #
+    # The alternative that also works is having some other service declare
+    # `depends_on: {kafka-init: {condition: service_completed_successfully}}`, which teaches Compose
+    # that the exit was expected. Rejected: no component here consumes channels, so it would mean
+    # inventing a service purely to satisfy a flag. Keeping it out of the profiles also keeps
+    # `make health` honest — a job that has finished is not a component whose health can be
+    # reported, and `config --services` never offers it to that target.
+    profiles: ["init"]
+
+    # The environment's ONLY genuine startup ordering dependency (T038). Channels cannot be created
+    # before the broker can serve metadata, and `service_healthy` reads the broker's own readiness
+    # probe rather than merely waiting for its container to exist.
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+    volumes:
+      # Read-only: the job runs the script, it does not edit it.
+      - ./kafka-init:/opt/kafka-init:ro
+
+    environment:
+      # The INTERNAL listener. This container is inside the Compose network, so `localhost` would
+      # be itself and `localhost:9092` would find nothing.
+      BOOTSTRAP_SERVER: kafka:29092
+
+    command: ["bash", "/opt/kafka-init/create-topics.sh"]
+
+    # Explicit, because the default is to restart on failure — which for a job means retrying
+    # forever instead of reporting that provisioning failed.
+    restart: "no"
+
+    mem_limit: 256m
+    memswap_limit: 256m
+
+    # TRADEOFF: R4 specified `NewTopic` beans, letting Spring's KafkaAdmin create the channels at
+    # application startup with idempotency handled for free. Rejected because of ordering: FR-020
+    # requires the fourteen channels to exist "once the environment is running", and SC-009 checks
+    # them on a freshly started environment — but at build step 1 no Spring application exists yet,
+    # and none will until step 2. Provisioning through a bean would make environment startup depend
+    # on a built jar, which is the chicken-and-egg this file exists to avoid.
+    #
+    # The cost is real and worth naming: channel names now live in TWO places, this script and
+    # Topics.java, with nothing enforcing agreement. Scenario 5 in quickstart.md is the guard — it
+    # lists the channels and counts fourteen. Once the services exist, `NewTopic` beans can be added
+    # alongside this script; they are idempotent, so the two would not conflict.
+
 volumes:
   kafka-data:
   postgres-data:

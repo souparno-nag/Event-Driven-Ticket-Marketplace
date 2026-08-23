@@ -44,8 +44,21 @@ COMPOSE := docker compose -f infra/docker-compose.yml
 # The timeout encodes SC-002 — every component healthy within five minutes — instead of leaving it
 # as prose in the spec. Without it a component that never becomes healthy hangs the terminal
 # indefinitely; with it, that failure is reported and the shell comes back.
+# The second step provisions the fourteen message channels (T044/T045). It runs AFTER --wait, so
+# the broker is known to be serving before any channel is created.
+#
+# `run --rm` rather than leaving the job in the `up` set: a container that exits is neither running
+# nor healthy, and `--wait` cannot tell "finished" from "died", so a job inside that set fails every
+# `make up` on exit code 0. `run` waits for the job and PROPAGATES ITS EXIT CODE, so a failed
+# provisioning still fails `make up` — verified, a job exiting 3 makes this command exit 3.
+#
+# The guard exists because `obs` runs without a broker. Asking `config --services` whether kafka is
+# active reuses the same profile-derived list `make health` reads, rather than assuming.
 up:
 	$(COMPOSE) up -d --wait --wait-timeout 300
+	@if $(COMPOSE) config --services | grep -qx kafka; then \
+	  $(COMPOSE) run --rm kafka-init; \
+	fi
 
 # FR-016: one line per component, so an operator can see WHICH one is unhealthy without reading
 # raw logs. `make up` already fails on an unhealthy environment, but it fails as a single verdict;
