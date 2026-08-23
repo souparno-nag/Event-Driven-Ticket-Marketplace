@@ -89,7 +89,7 @@ outbox row referring to it. Force a failure mid-transaction and confirm neither 
 - [X] T075 [P] [US1] Create `order-service/src/test/java/com/marketplace/orders/OrderAcceptanceIT.java` — extends `PostgresIT`. Asserts one accepted request yields exactly one order and one outbox row sharing an id; that a forced failure writing the outbox row rolls the order back; and that 200 concurrent submissions produce 200 orders and 200 outbox rows with no interleaving loss (FR-007, SC-001, SC-002)
 - [X] T076 [P] [US1] Create `order-service/src/test/java/com/marketplace/orders/api/OrderApiIT.java` — asserts 202 with a `Location` header and `status: PENDING`, and that each malformed request returns 400 with the field named and leaves the order count unchanged (FR-002, FR-005, SC-009)
 - [X] T077 [P] [US1] Create `order-service/src/test/java/com/marketplace/orders/api/OrderCapacityIT.java` — saturates the connection pool and asserts excess requests return 503 with `Retry-After`, an RFC 7807 body whose `type` differs from the validation problem type, and never 400 or 500 (FR-035, FR-036, SC-016)
-- [ ] T078 [P] [US1] Create `order-service/src/test/java/com/marketplace/orders/domain/OrderVersionIT.java` — two concurrent updates to one order; asserts the losing writer raises `OptimisticLockingFailureException` rather than silently overwriting (FR-022, R9)
+- [X] T078 [P] [US1] Create `order-service/src/test/java/com/marketplace/orders/domain/OrderVersionIT.java` — two concurrent updates to one order; asserts the losing writer raises `OptimisticLockingFailureException` rather than silently overwriting (FR-022, R9)
 
 ### Implementation for User Story 1
 
