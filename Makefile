@@ -7,6 +7,7 @@
 # (see `up` in particular).
 #
 #   make up      start the components for the active profile and wait until they are healthy
+#   make health  report the state of each component in the active profile, one line each
 #   make down    stop everything and delete its data — the clean reset
 #   make build   compile and test every module from the root
 #   make logs    follow logs, optionally for one component
@@ -24,7 +25,7 @@ COMPOSE := docker compose -f infra/docker-compose.yml
 # whose file already exists and looks up to date. `build` is exactly the name that collides — the
 # day a `build/` directory appears, `make build` would silently do nothing. Declaring these as
 # phony says "this is a command, not a file", so they always run.
-.PHONY: up down build logs
+.PHONY: up health down build logs
 
 # Set explicitly rather than relying on `up` happening to be written first. Without this line the
 # behaviour of a bare `make` is decided by the ORDER of the targets below, so reordering the file
@@ -45,6 +46,56 @@ COMPOSE := docker compose -f infra/docker-compose.yml
 # indefinitely; with it, that failure is reported and the shell comes back.
 up:
 	$(COMPOSE) up -d --wait --wait-timeout 300
+
+# FR-016: one line per component, so an operator can see WHICH one is unhealthy without reading
+# raw logs. `make up` already fails on an unhealthy environment, but it fails as a single verdict;
+# this is the target that says which component to go and look at.
+#
+# THE THING THIS TARGET MUST NOT DO is check a hardcoded list of components. Under `core` only three
+# of the six are supposed to be running, so a fixed list would report Elasticsearch, Zipkin, and
+# Prometheus as failures every single time — training the reader to ignore red output, which is
+# worse than having no health target at all.
+#
+# `config --services` is the fix, and it is exactly the right source: it returns the services the
+# ACTIVE profile enables, computed by Compose from the same COMPOSE_PROFILES the `up` target obeyed.
+# The list can never drift from what was started, because it is not a second list.
+#
+# WHY `docker inspect` rather than parsing `docker compose ps`: ps renders a human-facing status
+# string ("Up 4 minutes (healthy)") whose shape is not a stable interface. inspect returns the
+# state field itself. The template prefers the health status when the container declares a health
+# check and falls back to the raw container state when it does not — which is what distinguishes
+# "running but not yet ready" from "ready".
+#
+# `exited:0` is reported as `completed` rather than a failure, for the one-shot topic provisioner
+# arriving in T045. A container that did its job and exited is not a broken component, and treating
+# it as one would make a correct environment report a permanent failure.
+health:
+	@services="$$($(COMPOSE) config --services 2>/dev/null | sort)"; \
+	if [ -z "$$services" ]; then \
+	  echo "No components in the active profile (COMPOSE_PROFILES=$${COMPOSE_PROFILES:-unset from the environment; see infra/.env})"; \
+	  exit 1; \
+	fi; \
+	failed=0; \
+	for svc in $$services; do \
+	  cid="$$($(COMPOSE) ps -aq $$svc 2>/dev/null | head -n1)"; \
+	  if [ -z "$$cid" ]; then \
+	    state="not created"; \
+	  else \
+	    state="$$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}:{{.State.ExitCode}}{{end}}' $$cid 2>/dev/null)"; \
+	  fi; \
+	  case "$$state" in \
+	    healthy)    mark="ok  " ;; \
+	    running:*)  mark="ok  "; state="running (no health check declared)" ;; \
+	    exited:0)   mark="ok  "; state="completed" ;; \
+	    starting)   mark="WAIT"; failed=1 ;; \
+	    *)          mark="FAIL"; failed=1 ;; \
+	  esac; \
+	  printf '  %s  %-16s %s\n' "$$mark" "$$svc" "$$state"; \
+	done; \
+	if [ $$failed -ne 0 ]; then \
+	  echo "  -> not ready. 'make logs SERVICE=<name>' shows why; 'make up' starts what is missing."; \
+	fi; \
+	exit $$failed
 
 # -v deletes the named volumes, so this is a reset rather than a stop.
 #
