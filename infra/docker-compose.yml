@@ -5,7 +5,7 @@
 #
 #   core  Kafka + PostgreSQL + Redis            ~1.1 GiB   build steps 1-5
 #   obs   Zipkin + Prometheus                   ~0.5 GiB   build step 8
-#   full  everything above + Elasticsearch      ~2.6 GiB   build step 6 onward
+#   full  everything above + Elasticsearch      ~3.1 GiB   build step 6 onward
 #
 # `full` is six services, not the seven the brief lists. Eureka is absent deliberately: unlike
 # everything here it is not a third-party server but a Spring Boot app this project builds, so it
@@ -252,19 +252,40 @@ services:
       # No TLS and no authentication. Localhost-only demo data, and leaving security on would mean
       # generating certificates before the first request — cost with no benefit at this scale.
       xpack.security.enabled: "false"
-      # Two thirds of the container limit. Elasticsearch is unusually dependent on the memory it
-      # does NOT get: Lucene memory-maps index segments and reads them through the OS page cache,
-      # which lives outside the heap. A heap set near the limit starves the file cache and makes
-      # search slower, not faster (R10).
+      # 42% of the container limit. Elasticsearch is unusually dependent on the memory it does NOT
+      # get: Lucene memory-maps index segments and reads them through the OS page cache, which lives
+      # outside the heap. A heap set near the limit starves the file cache and makes search slower,
+      # not faster (R10).
       ES_JAVA_OPTS: -Xms640m -Xmx640m
+
+      # WHY machine learning is off: ES 8 starts native ML processes that allocate OUTSIDE the JVM
+      # heap, so they are invisible to -Xmx and land straight against the container cap. Nothing in
+      # this project uses ML, so this is pure overhead removed from the tightest budget here.
+      xpack.ml.enabled: "false"
+
       # Locking heap into RAM needs a memlock ulimit this compose file does not grant; asking for it
       # anyway makes the node refuse to start rather than degrade.
       bootstrap.memory_lock: "false"
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
-    mem_limit: 1g
-    mem_reservation: 768m
-    memswap_limit: 1g
+
+    # 1.5 GiB, not the 1 GiB this started as. That original figure was MEASURED WRONG in T042:
+    # Elasticsearch was OOM-killed during startup, `OOMKilled=true ExitCode=137`, before it ever
+    # served a request.
+    #
+    # The arithmetic explains it. `-Xms640m` commits the whole heap up front, and outside it sit
+    # metaspace, the code cache, thread stacks for the hundred-plus threads ES starts, Netty's
+    # direct buffers, and GC structures — comfortably past 1 GiB before Lucene caches a single
+    # segment. A 640 MiB heap was 62.5% of the old cap, where Elastic's own guidance is at most 50%
+    # and less in a container.
+    #
+    # TRADEOFF: the alternative was keeping the 1 GiB cap and cutting the heap to 512m. Rejected
+    # because it treats the symptom — off-heap demand is what overflowed, so a smaller heap buys
+    # only the difference while making every search slower. Raising the cap is the honest fix, and
+    # it costs 512 MiB in a profile that is optional until build step 6.
+    mem_limit: 1536m
+    mem_reservation: 1g
+    memswap_limit: 1536m
     healthcheck:
       # ACCEPTS YELLOW. A single-node cluster assigns every primary shard and then cannot place a
       # single replica, because a replica on the same node would defend against nothing. So its

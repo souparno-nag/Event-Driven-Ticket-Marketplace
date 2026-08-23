@@ -17,14 +17,14 @@ make down     # stop and delete data — a clean reset
 
 ## Profiles: choose what runs
 
-Running all six components costs about 2.6 GiB, and until build step 6 half of them do nothing.
+Running all six components costs about 3.1 GiB, and until build step 6 half of them do nothing.
 Each service is tagged with a **profile**, and the active profile decides what starts.
 
 | Profile | Components | Memory | Needed from |
 |---|---|---|---|
 | `core` | Kafka, PostgreSQL, Redis | ~1.1 GiB | build steps 1–5 |
 | `obs` | Zipkin, Prometheus | ~0.5 GiB | build step 8 |
-| `full` | all of the above **+ Elasticsearch** | ~2.6 GiB | build step 6 onward |
+| `full` | all of the above **+ Elasticsearch** | ~3.1 GiB | build step 6 onward |
 
 Set it in [`.env`](./.env), which is committed and holds no secrets:
 
@@ -61,17 +61,17 @@ serving. A loud attributable failure beats a slow global one.
 | Kafka | 768 MiB | `KAFKA_HEAP_OPTS=-Xms512m -Xmx512m` | `core`, `full` |
 | PostgreSQL | 256 MiB | `shared_buffers=128MB`, `max_connections=50` | `core`, `full` |
 | Redis | 96 MiB | `--maxmemory 64mb --maxmemory-policy noeviction` | `core`, `full` |
-| Elasticsearch | 1 GiB | `ES_JAVA_OPTS=-Xms640m -Xmx640m` | `full` |
+| Elasticsearch | 1.5 GiB | `ES_JAVA_OPTS=-Xms640m -Xmx640m`, `xpack.ml.enabled=false` | `full` |
 | Zipkin | 256 MiB | `-XX:MaxRAMPercentage=65` | `obs`, `full` |
 | Prometheus | 256 MiB | `--storage.tsdb.retention.time=6h` | `obs`, `full` |
 | **`core` total** | **1120 MiB** | | |
-| **`full` total** | **2656 MiB** | | |
+| **`full` total** | **3168 MiB** | | |
 
 Each also sets `memswap_limit` equal to `mem_limit`, which forbids that container from swapping at
 all. On a machine whose swap is already under pressure, a container that fails fast is more useful
 than one that crawls.
 
-**Have ~2 GiB genuinely free before `make up` under `core`**, and ~3.5 GiB under `full`. Check with:
+**Have ~2 GiB genuinely free before `make up` under `core`**, and ~4 GiB under `full`. Check with:
 
 ```bash
 free -h
@@ -88,10 +88,19 @@ and waste the rest.
 The heap must also stay well *below* the limit, because metaspace, thread stacks, direct byte
 buffers, and GC structures all live outside it. Roughly 60–70% is the working range.
 
-Elasticsearch is the exception that proves the rule: its heap is deliberately two thirds of its
-limit because Lucene memory-maps index segments and reads them through the **OS page cache**, which
-is outside the heap. A heap set near the limit starves that cache and makes search slower, not
-faster.
+**Elasticsearch sits lower still, at 42%, and that figure was learned the hard way.** It originally
+had a 1 GiB cap with the same 640 MiB heap, and it was OOM-killed during startup — `OOMKilled=true`,
+exit 137 — before serving a request. `-Xms` commits the whole heap immediately, and outside it sit
+metaspace, thread stacks for the hundred-plus threads Elasticsearch starts, Netty's direct buffers,
+and GC structures; together they cleared 1 GiB before Lucene cached a single segment.
+
+Two things changed. The cap went to 1.5 GiB, and `xpack.ml.enabled=false` switched off the native
+machine-learning processes, which allocate *outside* the JVM heap and are therefore invisible to
+`-Xmx` while counting fully against the container cap.
+
+The low ratio is right for a second reason too: Lucene memory-maps index segments and reads them
+through the **OS page cache**, which is also outside the heap. A heap set near the limit starves
+that cache and makes search slower, not faster.
 
 ---
 
@@ -164,7 +173,7 @@ the kill — usually you, or a `docker stop` that timed out.
 
 If it was an OOM kill, in order of likelihood:
 
-1. **Run a smaller profile.** If you are on `full` and only need steps 1–5, `core` frees 1.5 GiB.
+1. **Run a smaller profile.** If you are on `full` and only need steps 1–5, `core` frees 2 GiB.
 2. **Free host memory.** The cap is what the container may use; the host still has to have it.
 3. **Raise that one limit** in `docker-compose.yml` — and if the component is JVM-based, raise its
    heap setting with it. Raising `mem_limit` alone changes nothing for Kafka or Zipkin, whose heaps

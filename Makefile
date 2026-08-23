@@ -107,8 +107,19 @@ health:
 # a reset that is only clean when you remember an extra flag is not a reset. Nothing here holds data
 # worth keeping — it is generated demo state — so the usual reason to preserve volumes does not
 # apply. A real deployment would invert this default.
+#
+# `--profile '*'` enables EVERY profile, and that asymmetry with `up` is deliberate. Compose filters
+# `down` by the active profile exactly as it filters `up`, so a plain `down` under `core` removes
+# the three core containers and silently leaves Zipkin, Prometheus, and Elasticsearch running.
+# T042 hit precisely this: after a `full` run, `make down` reported success while two containers
+# stayed up for another forty minutes, holding the project network so the next teardown failed with
+# "Resource is still in use".
+#
+# Starting is a question of what you need; stopping is not. Teardown should always mean "leave
+# nothing behind", whatever the file happened to be set to when you started. --remove-orphans
+# extends that to containers whose service has since been deleted from the compose file.
 down:
-	$(COMPOSE) down -v
+	$(COMPOSE) --profile '*' down -v --remove-orphans
 
 # The root build. `verify` rather than `install`: verify compiles and runs the tests without copying
 # artifacts into the developer's ~/.m2, which keeps the build from mutating machine-global state as
