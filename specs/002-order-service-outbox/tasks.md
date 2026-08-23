@@ -101,7 +101,7 @@ outbox row referring to it. Force a failure mid-transaction and confirm neither 
 - [X] T084 [US1] Create `order-service/src/main/java/com/marketplace/orders/api/ApiExceptionHandler.java` — `@RestControllerAdvice` producing RFC 7807 `ProblemDetail` responses with stable `type` URIs: validation → 400 naming the field, pool exhaustion or transaction timeout → 503 with `Retry-After: 1`. WHY comment: FR-036 needs a refusal that is machine-distinguishable from a bad request, and a status code alone is not stable across the step-7 gateway (FR-005, FR-006, FR-036)
 - [X] T085 [US1] Add `statement_timeout` to the datasource connection properties in `order-service/src/main/resources/application.yml`, matching the 3-second transaction timeout, so a slow query is cut off by the database rather than only by the application (FR-035, R5)
 - [X] T086 [US1] Create `order-service/src/main/java/com/marketplace/orders/api/CapacityMetrics.java` — the `orders.refused.capacity` counter, incremented by the 503 branch of the exception handler, so overload is visible as overload (FR-036, R12)
-- [ ] T087 [US1] Run quickstart scenarios S1, S4, and S5 against a running service and record the results (SC-001, SC-009, SC-010, SC-016)
+- [X] T087 [US1] Run quickstart scenarios S1, S4, and S5 against a running service and record the results (SC-001, SC-009, SC-010, SC-016)
 
 **Checkpoint**: Orders are accepted and durably recorded with their outbox rows. Nothing is published
 yet — the outbox fills and stays `PENDING`, which is the correct intermediate state.
