@@ -43,7 +43,7 @@ Multi-module Maven project, build root at the repository root. This step adds on
 - [X] T058 Adapt `order-service/pom.xml`: replace the `spring-boot-starter-parent` parent with `com.marketplace:ticket-marketplace:0.0.1-SNAPSHOT`, delete the now-inherited `<properties>` and version tags, add `common-events`, `micrometer-tracing-bridge-brave`, `zipkin-reporter-brave`, `micrometer-registry-prometheus`, and test-scope `testcontainers-postgresql`, `testcontainers-kafka`, `testcontainers-junit-jupiter`, `awaitility`. Keep `spring-boot-maven-plugin` in this module — a service is an executable application even though the root deliberately has none (R11)
 - [X] T059 Add `<module>order-service</module>` to the root `pom.xml` module list, immediately after `common-events` (step 1's FR-022 — registration alone, no restructuring)
 - [X] T060 Create `order-service/src/main/resources/application.yml`: `server.port: 8081`; datasource pointing at `localhost:5432/marketplace`; HikariCP `maximum-pool-size: 20` and `connection-timeout: 250ms`; `spring.transaction.default-timeout: 3s`; Flyway enabled; `spring.jpa.hibernate.ddl-auto: validate`; Kafka bootstrap `localhost:9092`; `outbox.relay.*` properties; actuator exposing `health,info,prometheus`; tracing sampling probability `1.0` and the Zipkin endpoint. Add a WHY comment on `ddl-auto: validate` recording that Flyway owns the schema and Hibernate must never alter it (R5, R8)
-- [ ] T061 Verify the module joins the build: `./mvnw -q -pl order-service -am verify` succeeds on the generated skeleton
+- [X] T061 Verify the module joins the build: `./mvnw -q -pl order-service -am verify` succeeds on the generated skeleton
 
 **Checkpoint**: `order-service` compiles as part of the root build. No behaviour yet.
 
