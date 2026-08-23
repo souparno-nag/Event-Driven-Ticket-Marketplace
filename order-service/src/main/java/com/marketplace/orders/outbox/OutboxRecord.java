@@ -123,6 +123,16 @@ public class OutboxRecord {
 		this.attempts = 0;
 	}
 
+	// The table's created_at column is NOT NULL DEFAULT now(), but Hibernate generates an INSERT
+	// that names every mapped column explicitly -- including this one, as NULL, if the Java field
+	// was never set. An explicit NULL overrides the database's DEFAULT rather than falling through to
+	// it, so without this callback every insert violates the NOT NULL constraint. @PrePersist runs
+	// immediately before that INSERT, which is what makes the two never disagree.
+	@PrePersist
+	void onInsert() {
+		this.createdAt = Instant.now();
+	}
+
 	/**
 	 * Records that the broker acknowledged this message.
 	 *
