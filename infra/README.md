@@ -160,6 +160,52 @@ Two Kafka ports are **not** published, deliberately: `29092` is the inter-contai
 
 ---
 
+## Message channels
+
+`make up` provisions fourteen Kafka channels — one per saga message type, each paired with a
+dead-letter channel:
+
+```
+order.created      seats.reserved     seats.rejected     payment.succeeded
+payment.failed     order.confirmed    order.cancelled          (+ .DLT for each)
+```
+
+Creation is idempotent, so running `make up` against an environment that already has them succeeds
+and changes nothing. To inspect them:
+
+```bash
+docker compose -f infra/docker-compose.yml exec kafka \
+  kafka-topics --bootstrap-server localhost:9092 --list
+
+docker compose -f infra/docker-compose.yml exec kafka \
+  kafka-topics --bootstrap-server localhost:9092 --describe --topic order.created
+```
+
+| Setting | Value | Why |
+|---|---|---|
+| Partitions | **3** | The unit of parallelism. Messages are keyed by `sagaId`, so one order's messages share a partition and stay ordered, while different orders spread across partitions and proceed concurrently. |
+| Replication factor | **1** | Forced by the single broker — see below. |
+
+### Replication factor 1 is a local constraint, not a topology
+
+`--describe` reports `ReplicationFactor: 1` and `Isr: 1`. That means **one copy of each partition,
+with no redundancy at all.** If the broker's volume is lost, every message is lost with it.
+
+This is not a recommendation. A replication factor above 1 requires more brokers to put the replicas
+on, and topic creation fails outright on a single node rather than quietly degrading. A production
+deployment runs at least three brokers with replication factor 3 and `min.insync.replicas=2`, so a
+broker can fail without losing acknowledged writes.
+
+It is correct *here* because this environment holds generated demo data and `make down` deletes its
+volumes deliberately (FR-015). Buying redundancy would mean two more brokers at roughly 768 MiB
+each — tripling the memory budget to protect data the environment discards on every teardown.
+
+The broker's own internal topics (`__consumer_offsets`, the transaction state log) are set to
+replication factor 1 for the same reason; left at their default of 3 they would fail to create on
+one broker.
+
+---
+
 ## When something goes wrong
 
 ### A component was killed — exit code 137

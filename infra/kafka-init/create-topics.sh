@@ -24,8 +24,9 @@ BOOTSTRAP="${BOOTSTRAP_SERVER:-kafka:29092}"
 PARTITIONS="${TOPIC_PARTITIONS:-3}"
 
 # Forced by the single-broker local setup: a replication factor above 1 needs more brokers to put
-# the replicas on, and topic creation fails outright. Not a production topology, and the README
-# says so (R6).
+# the replicas on, and topic creation fails outright. Not a production topology — the cost, and why
+# it is acceptable here, is spelled out on the kafka-init service in docker-compose.yml and for
+# operators in infra/README.md under "Message channels" (R6).
 REPLICATION="${TOPIC_REPLICATION:-1}"
 
 # The seven message types, mirroring the constants in Topics.java. Kept in the same order as that

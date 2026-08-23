@@ -433,6 +433,24 @@ services:
     mem_limit: 256m
     memswap_limit: 256m
 
+    # TRADEOFF: every channel this job creates gets REPLICATION FACTOR 1 — one copy of each
+    # partition, on the only broker there is. It is not a choice so much as the consequence of a
+    # single-node broker: a replication factor above 1 needs additional brokers to place the
+    # replicas on, and topic creation fails outright rather than degrading.
+    #
+    # What that costs, stated plainly rather than left implied: there is NO fault tolerance. If the
+    # broker's volume is lost, every message in every channel is lost with it, and no consumer can
+    # recover them. A production topology runs at least three brokers with replication factor 3 and
+    # `min.insync.replicas=2`, so a broker can fail without losing acknowledged writes.
+    #
+    # It is the right call here and only here: this environment holds generated demo data, `make
+    # down` deletes its volumes on purpose (FR-015), and the alternative costs two more brokers at
+    # roughly 768 MiB each — tripling the memory budget to protect data the project throws away
+    # every teardown. The same reasoning covers the broker's own internal topics above (R6).
+    #
+    # Documented for operators in infra/README.md under "Message channels", because `--describe`
+    # shows `ReplicationFactor: 1` and a reader should find out why there rather than guessing.
+
     # TRADEOFF: R4 specified `NewTopic` beans, letting Spring's KafkaAdmin create the channels at
     # application startup with idempotency handled for free. Rejected because of ordering: FR-020
     # requires the fourteen channels to exist "once the environment is running", and SC-009 checks
