@@ -275,7 +275,7 @@ cryptic metadata mismatch rather than an obvious error.
 
 ```bash
 docker compose -f infra/docker-compose.yml exec kafka \
-  kafka-topics.sh --bootstrap-server localhost:9092 --list | sort
+  kafka-topics --bootstrap-server localhost:9092 --list | sort
 ```
 
 **Expect**: exactly **fourteen** channels — the seven message channels plus a `.DLT` for each.
@@ -284,7 +284,7 @@ is idempotent (FR-021).
 
 ```bash
 docker compose -f infra/docker-compose.yml exec kafka \
-  kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic order.created
+  kafka-topics --bootstrap-server localhost:9092 --describe --topic order.created
 ```
 
 **Expect**: `PartitionCount: 3` (FR-027), `ReplicationFactor: 1` — the latter forced by the
