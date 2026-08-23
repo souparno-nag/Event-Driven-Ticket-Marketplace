@@ -120,6 +120,8 @@ asserts that every order's messages come back in the order they were sent. Integ
 ## Roadmap
 
 Build steps come from [`CLAUDE.md`](CLAUDE.md). Each one after this is its own specification.
+[`docs/ROADMAP.md`](docs/ROADMAP.md) breaks the remaining ten down — scope, prerequisites, what to
+write by hand, and the traps already identified in each.
 
 | Step | Scope | Status |
 |---|---|---|
