@@ -142,7 +142,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T053 [P] Create the repository `README.md` — what the project is, prerequisites, `make up` quickstart, profile table, and a link to the spec directory. The full saga diagram and rationale sections arrive at build step 11
 - [x] T054 [P] Add a `TRADEOFF:` comment in `infra/docker-compose.yml` recording replication factor 1 as a single-broker local constraint, not a production topology (R6)
 - [x] T055 Confirm every non-obvious line carries a WHY comment rather than a WHAT comment, per the project constraints
-- [ ] T056 Walk the Definition of Done checklist in `quickstart.md` end to end and tick every item
+- [x] T056 Walk the Definition of Done checklist in `quickstart.md` end to end and tick every item
 
 ---
 

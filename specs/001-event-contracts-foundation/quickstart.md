@@ -135,11 +135,13 @@ COMPOSE_PROFILES=core      # core | obs | full
 |---|---|---|---|
 | `core` | Kafka, PostgreSQL, Redis | ~1.1 GiB | Build steps 1–5 |
 | `obs` | Zipkin, Prometheus | ~0.5 GiB | Step 8 |
-| `full` | All seven | ~3 GiB | Step 6 onward |
+| `full` | All six | ~3.1 GiB | Step 6 onward |
 
-Elasticsearch and Eureka are the two heaviest components and are not needed until steps 6 and 7,
-so `core` is the right default for everything this step validates. Change the one line and re-run
-`make up` — no Compose edits.
+`full` is **six** components, not seven. Eureka is absent deliberately: it is not third-party
+infrastructure but a Spring Boot application this project builds, so it arrives at build step 7
+alongside the gateway that is its only consumer (T033). Elasticsearch is the heaviest of the six and
+is not needed until step 6, so `core` is the right default for everything this step validates.
+Change the one line and re-run `make up` — no Compose edits.
 
 ### Optional — run your own services on the host
 
@@ -190,9 +192,9 @@ images pull, with Elasticsearch the slowest to report healthy.
 | PostgreSQL | 5432 |
 | Redis | 6379 |
 | Elasticsearch | 9200 |
-| Eureka | 8761 |
 | Zipkin | 9411 |
 | Prometheus | 9090 |
+| *Eureka* | *8761* | *not yet — build step 7* |
 
 A port conflict surfaces as a container that exits immediately. `docker compose logs <service>`
 names the conflict; `sudo lsof -i :<port>` identifies the process holding it.
@@ -317,24 +319,41 @@ in the root POM and the new module's own POM.
 
 ## Definition of Done
 
-- [ ] All seven contracts exist as records; `dependency:tree` shows no framework dependency
-- [ ] Round-trip test passes for all seven types, including the unknown-field case
-- [ ] No contract field is ambiguous between message identity and show identity
-- [ ] `SeatsReserved` carries `lockExpiresAt`, validated as strictly after `occurredAt`
-- [ ] `make up` reaches full health from a clean checkout in under 5 minutes, verified at least
+- [x] All seven contracts exist as records; `dependency:tree` shows no framework dependency
+- [x] Round-trip test passes for all seven types, including the unknown-field case
+- [x] No contract field is ambiguous between message identity and show identity
+- [x] `SeatsReserved` carries `lockExpiresAt`, validated as strictly after `occurredAt`
+- [x] `make up` reaches full health from a clean checkout in under 5 minutes, verified at least
       once under `COMPOSE_PROFILES=full`
-- [ ] `make health` reports each component individually and derives its list from the active
+- [x] `make health` reports each component individually and derives its list from the active
       profile rather than a hardcoded seven
-- [ ] Every service declares `mem_limit`, `mem_reservation`, and `memswap_limit`; every JVM
-      service pins its heap to roughly 60–70% of its cap
-- [ ] `core` profile starts within ~1.1 GiB, confirmed via `docker stats`
-- [ ] Ten teardown/restart cycles all succeed
-- [ ] Exactly fourteen channels exist, 3 partitions each, created idempotently
-- [ ] Ordering test passes across 100 concurrent orders
-- [ ] `./mvnw clean verify` succeeds from a clean checkout
-- [ ] `infra/README.md` documents the profile table, per-component memory budget, and port map
-- [ ] JSON schemas in `contracts/` match the records field-for-field — a manual review step, as
+- [x] Every service declares `mem_limit`, `mem_reservation`, and `memswap_limit`; every JVM
+      service pins its heap explicitly rather than accepting the JVM's 25% default, at a fraction
+      of its cap that leaves room for off-heap memory — roughly 60–70% for Kafka and Zipkin, and
+      **42% for Elasticsearch**, which was raised to 1.5 GiB after being OOM-killed at 1 GiB with a
+      640 MiB heap (T042)
+- [x] `core` profile starts within ~1.1 GiB, confirmed via `docker stats`
+- [x] Ten teardown/restart cycles all succeed
+- [x] Exactly fourteen channels exist, 3 partitions each, created idempotently
+- [x] Ordering test passes across 100 concurrent orders
+- [x] `./mvnw clean verify` succeeds from a clean checkout
+- [x] `infra/README.md` documents the profile table, per-component memory budget, and port map
+- [x] JSON schemas in `contracts/` match the records field-for-field — a manual review step, as
       there is no registry enforcing it
+
+### Known gap at completion
+
+**FR-011 is satisfied for six of its seven components.** It requires the environment to bring up a
+message broker, in-memory store, relational database, search index, **service registry**, tracing
+collector, and metrics collector. The service registry — Eureka — is deferred to build step 7,
+because it is not third-party infrastructure but a Spring Boot application this project builds, and
+provisioning it here would make the environment unbringable without first compiling Java. The
+decision and its reasoning are recorded in `docs/tasks/T033-eureka-deferred.md`; T033 stays
+unchecked in `tasks.md` as the pointer forward.
+
+Nothing else in this step depends on the registry, so the six components that exist are complete and
+verified. This is recorded rather than ticked, so the checklist above does not claim more than was
+built.
 
 ---
 

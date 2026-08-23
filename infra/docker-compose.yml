@@ -431,6 +431,10 @@ services:
     restart: "no"
 
     mem_limit: 256m
+    # Present for the same reason as every other service, even though a job that lives for two
+    # seconds will never contend for memory: the rule is "every service declares all three", and a
+    # rule with one silent exception is a rule nobody can check.
+    mem_reservation: 128m
     memswap_limit: 256m
 
     # TRADEOFF: every channel this job creates gets REPLICATION FACTOR 1 — one copy of each
