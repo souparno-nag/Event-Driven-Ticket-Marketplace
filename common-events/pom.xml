@@ -118,30 +118,10 @@
 	</dependencies>
 
 	<!--
-	  Still no spring-boot-maven-plugin. This module builds to an ordinary jar that other modules
-	  put on their classpath; the compiler settings and Java 21 release come from the parent.
-
-	  The one thing configured here is the Docker API version the Testcontainers client negotiates,
-	  passed to the test JVM. See ${docker.api.version} in the root pom for why it is needed at all
-	  — without it, any Testcontainers test fails on a Docker 29 engine before starting a container.
-
-	  Surefire does not run OrderingGuaranteeIT during a normal build; the *IT suffix is Failsafe's
-	  convention and T049 binds it to the verify phase. This configuration is what lets a developer
-	  run it on its own — `./mvnw -pl common-events test -Dtest=OrderingGuaranteeIT` — without having
-	  to know about the flag.
+	  No <build> section, and specifically no spring-boot-maven-plugin. This module builds
+	  to an ordinary jar that other modules put on their classpath. The compiler settings,
+	  the Java 21 release, and the Surefire/Failsafe test wiring all come from the parent —
+	  which is what lets a new module be added by registration alone (SC-008).
 	-->
-	<build>
-		<plugins>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-surefire-plugin</artifactId>
-				<configuration>
-					<systemPropertyVariables>
-						<api.version>${docker.api.version}</api.version>
-					</systemPropertyVariables>
-				</configuration>
-			</plugin>
-		</plugins>
-	</build>
 
 </project>

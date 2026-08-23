@@ -91,4 +91,77 @@
 	  declares the plugin for itself instead.
 	-->
 
+	<!--
+	  TEST EXECUTION, declared once here and inherited by every module (FR-018).
+
+	  Two plugins, because there are two kinds of test and they should not be run the same way:
+
+	    Surefire  runs UNIT tests during `test`. Fast, no external process, no Docker. These are
+	              the ones that must stay quick enough to run constantly while editing.
+	    Failsafe  runs INTEGRATION tests during `verify`, matching **/*IT.java by convention. These
+	              start real infrastructure, take seconds rather than milliseconds, and prove things
+	              a unit test cannot — OrderingGuaranteeIT needs an actual broker to say anything
+	              about partitioning at all.
+
+	  WHY Failsafe rather than simply letting Surefire run everything: the two plugins differ in
+	  how they FAIL. Surefire fails the build the moment a test fails, which is right for unit
+	  tests. Failsafe records the result, lets the `post-integration-test` phase run, and only then
+	  fails the build during `verify` — so infrastructure started for a test is always torn down,
+	  even when the test fails. Mixing the two means a failing test can leave containers behind.
+
+	  The naming convention is the whole interface: a class ending in `Test` is a unit test and
+	  runs in `test`; one ending in `IT` is an integration test and runs in `verify`. Nothing needs
+	  listing anywhere.
+
+	  TRADEOFF: this makes `./mvnw verify` — and therefore `make build` — require a working Docker
+	  engine, and adds a few seconds for the container to start. The alternative was hiding
+	  integration tests behind an opt-in profile, which was rejected because a test nobody runs by
+	  default is a test that rots: it would break silently and be discovered only when someone
+	  eventually remembered the flag. SC-004 asks that one root command builds and tests everything,
+	  and a concurrency guarantee that is only checked on request is not really being checked.
+	-->
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<systemPropertyVariables>
+						<!--
+						  Only Testcontainers reads this, so it is inert for tests that do not use
+						  Docker. It lives on both plugins because a unit test run explicitly by name
+						  (`-Dtest=OrderingGuaranteeIT`) goes through Surefire, not Failsafe.
+						-->
+						<api.version>${docker.api.version}</api.version>
+					</systemPropertyVariables>
+				</configuration>
+			</plugin>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<!--
+				  Spring Boot's parent pins the version but binds no goals, so without this block
+				  Failsafe is configured and never runs — and *IT tests would be silently skipped by
+				  every build. Declaring both goals is what actually attaches it to the lifecycle:
+				  `integration-test` runs the tests, `verify` is what turns a failure into a failed
+				  build.
+				-->
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<systemPropertyVariables>
+						<api.version>${docker.api.version}</api.version>
+					</systemPropertyVariables>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+
 </project>

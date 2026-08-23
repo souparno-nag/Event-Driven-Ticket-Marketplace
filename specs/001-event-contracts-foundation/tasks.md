@@ -128,7 +128,7 @@ Multi-module Maven project, build root at the repository root. Module sources li
 - [x] T046 [P] [US3] Create `common-events/src/test/java/com/marketplace/events/TopicNameDriftTest.java` — asserts `Topics.ALL` has exactly seven entries and that `Topics.dlt()` matches the `.DLT` suffix used by the provisioning script, closing the drift risk the init-container approach introduces
 - [x] T047 [US3] Verify Scenario 5: list channels and assert exactly fourteen; `--describe order.created` shows `PartitionCount: 3` and `ReplicationFactor: 1`. Re-run `make up` without teardown to confirm idempotency (SC-009, FR-021)
 - [x] T048 [US3] Create `common-events/src/test/java/com/marketplace/events/OrderingGuaranteeIT.java` — Testcontainers Kafka; publish 100 orders concurrently, several messages each, keyed by `sagaId`; assert every order's messages are consumed in production order and that messages from different orders interleave, proving partitioning is real (SC-011, FR-026, FR-027)
-- [ ] T049 [US3] Bind `OrderingGuaranteeIT` to the `verify` phase via `maven-failsafe-plugin` in the build root, so integration tests run separately from unit tests
+- [x] T049 [US3] Bind `OrderingGuaranteeIT` to the `verify` phase via `maven-failsafe-plugin` in the build root, so integration tests run separately from unit tests
 - [ ] T050 [US3] Verify Scenario 7: `./mvnw clean verify` from a clean checkout builds and tests all modules in dependency order (SC-004)
 - [ ] T051 [US3] Verify SC-008: add a throwaway empty module, confirm the only edits needed are one `<module>` line in the root `pom.xml` plus the new module's own `pom.xml`, then remove it
 
