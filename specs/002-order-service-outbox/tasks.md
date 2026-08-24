@@ -126,7 +126,7 @@ request involved.
 - [X] T090 [P] [US2] Create `order-service/src/test/java/com/marketplace/orders/outbox/OutboxTracingIT.java` — guarantees 9–10: the stored trace context is injected into the outgoing headers and the publish span continues the accepting request's trace; a row with no stored context is still sent, untraced and without error (FR-026, FR-027, SC-012)
 - [X] T091 [P] [US2] Create `order-service/src/test/java/com/marketplace/orders/outbox/OutboxConcurrencyIT.java` — guarantee 11: three relays polling one database over at least 1,000 rows; asserts every row is sent and no row is sent twice (FR-012, FR-013, SC-006)
 - [X] T092 [P] [US2] Create `order-service/src/test/java/com/marketplace/orders/outbox/OutboxOrderingIT.java` — guarantee 12: at least 100 orders each with several outbox rows, relayed concurrently; asserts zero ordering inversions within any one order, and that a `PARKED` row halts its own order while every other order continues (FR-014, FR-030, SC-007, SC-013)
-- [ ] T093 [P] [US2] Create `order-service/src/test/java/com/marketplace/orders/outbox/OutboxRestartRecoveryIT.java` — stops the relay with rows outstanding, restarts it, and asserts all outstanding rows are sent with no manual step (FR-019, SC-005)
+- [X] T093 [P] [US2] Create `order-service/src/test/java/com/marketplace/orders/outbox/OutboxRestartRecoveryIT.java` — stops the relay with rows outstanding, restarts it, and asserts all outstanding rows are sent with no manual step (FR-019, SC-005)
 
 ### Implementation for User Story 2
 
