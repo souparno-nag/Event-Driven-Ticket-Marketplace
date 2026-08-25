@@ -5,11 +5,12 @@ each service reacting to messages and publishing its own. It exists to demonstra
 make distributed transactions work: the transactional outbox, idempotent consumers, compensating
 actions, and a CQRS read model.
 
-> ### Status: build step 1 of 11 — the foundation
+> ### Status: build step 2 of 11 — order acceptance and the transactional outbox
 >
-> What exists today is the **shared message contract library**, the **multi-module build**, and a
-> **one-command local environment**. There is no booking logic yet: no order service, no seat
-> locking, no payments, no saga. Those arrive in build steps 2 through 5.
+> What exists today is the **shared message contract library**, the **multi-module build**, a
+> **one-command local environment**, and **`order-service`**: accept a booking, record it and the
+> first saga event durably in one transaction, and read it back. There is still no seat locking, no
+> payments, no compensation. Those arrive in build steps 3 through 5.
 >
 > This is stated up front because a README describing the finished system would be describing
 > something you cannot run. The [roadmap](#roadmap) below says what is built and what is not.
@@ -79,6 +80,7 @@ Ports, per-component memory limits, and diagnostics are in [`infra/README.md`](i
 
 ```
 common-events/     Shared message contracts. Seven records, no framework dependencies.
+order-service/     Accepts bookings, owns the Order aggregate and its transactional outbox.
 infra/             docker-compose.yml, Kafka channel provisioning, environment docs.
 docs/tasks/        A written explanation of every task, in order.
 specs/             The specification driving the build.
@@ -102,6 +104,41 @@ Every message carries the same four-field envelope: `messageId` (the consumer's 
 The module has exactly **one** compile dependency — `jackson-annotations`. It deliberately carries no
 Spring, so any service can depend on it without inheriting a framework.
 
+### `order-service`
+
+The first real service, and the front door of the marketplace. Runs on **port 8081**. It owns the
+`Order` aggregate and the transactional outbox that announces it — the order row and the outbox row
+recording `OrderCreated` are written in one transaction, so either both exist or neither does. A
+background relay, polling every 500ms by default, drains that outbox onto Kafka once the transaction
+has actually committed, and a booking is not confirmed here — this step ends the moment the message
+is on its way; seat locking, payment, and confirmation arrive in later steps.
+
+Submit a booking:
+
+```bash
+curl -i -X POST http://localhost:8081/api/orders \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":"11111111-1111-1111-1111-111111111111",
+       "showId":"22222222-2222-2222-2222-222222222222",
+       "seatIds":["A1","A2"],
+       "amount":"150.00"}'
+```
+
+Expect `202 Accepted`, a `Location` header, and `{"orderId": "...", "status": "PENDING"}` — accepted
+for processing, not booked.
+
+Read it back:
+
+```bash
+curl http://localhost:8081/api/orders/<orderId>
+```
+
+Expect every field returned unchanged, plus `createdAt`/`updatedAt` and the current `status`. An
+identifier that isn't a well-formed UUID gets a `400`; a well-formed one nothing matches gets a `404`
+— each with its own RFC 7807 problem `type`, so a caller can tell the two apart without parsing text.
+
+Full HTTP contract: [`specs/002-order-service-outbox/contracts/orders-api.yaml`](specs/002-order-service-outbox/contracts/orders-api.yaml).
+
 ---
 
 ## Tests
@@ -112,8 +149,12 @@ Spring, so any service can depend on it without inheriting a framework.
 ```
 
 `verify` starts a Kafka container and publishes 500 messages across 100 orders from 8 threads, then
-asserts that every order's messages come back in the order they were sent. Integration tests are
-**not** behind an opt-in flag: a test nobody runs by default is a test that rots.
+asserts that every order's messages come back in the order they were sent — that is `common-events`'
+own suite. `order-service`'s own `verify` starts PostgreSQL and Kafka containers of its own and
+covers the outbox end to end: acceptance is genuinely atomic, the relay only marks a row sent after a
+real broker acknowledgement, one poisoned row never stalls another order's, and concurrent relays
+never send the same row twice. Integration tests are **not** behind an opt-in flag: a test nobody
+runs by default is a test that rots.
 
 ---
 
@@ -126,7 +167,7 @@ write by hand, and the traps already identified in each.
 | Step | Scope | Status |
 |---|---|---|
 | 1 | Contracts, build root, local environment | ✅ **done** |
-| 2 | `order-service` with a transactional outbox | not started |
+| 2 | `order-service` with a transactional outbox | ✅ **done** |
 | 3 | `inventory-service` — Redis seat locks via Lua | not started |
 | 4 | `payment-service` and saga completion | not started |
 | 5 | Compensation paths | not started |
