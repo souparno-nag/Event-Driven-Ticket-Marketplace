@@ -137,7 +137,7 @@ request involved.
 - [X] T098 [US2] Write `docs/tasks/T099-outbox-relay-guide.md` — a beginner-level guide to implementing `pollAndPublish`: what an outbox relay is and why it exists, what each collaborator provides, the twelve guarantees restated in plain language, and the five traps from `contracts/outbox-relay.md` with what each one looks like when it goes wrong. Delivered **before** T099 so the developer reads it first
 - [X] T099 **[human]** [US2] Implement the body of `pollAndPublish` in `order-service/src/main/java/com/marketplace/orders/outbox/OutboxRelay.java`, working from `contracts/outbox-relay.md` and the guide from T098. Done when T089–T093 pass
 - [X] T100 [US2] Review the T099 implementation against the twelve guarantees and the project's comment standards. Keep it if it passes and reads well; rewrite it only if it does not, explaining what was wrong and why (spec Clarifications)
-- [ ] T101 [US2] Run quickstart scenarios S2, S3, and S7 against a running service and record the results (SC-004, SC-005, SC-007, SC-013)
+- [X] T101 [US2] Run quickstart scenarios S2, S3, and S7 against a running service and record the results (SC-004, SC-005, SC-007, SC-013)
 
 **Checkpoint**: The saga's first message reaches `order.created`. Step 3 now has something to consume.
 
