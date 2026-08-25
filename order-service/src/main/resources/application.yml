@@ -98,6 +98,15 @@ management:
     health:
       show-details: always
   tracing:
+    # NOTE: management.tracing.propagation.type=W3C, tried here first, does NOT turn on a working
+    # propagator by itself in this Spring Boot version -- confirmed by direct inspection, not
+    # assumed. Spring Boot's own BravePropagationConfigurations has three competing branches for
+    # providing the Propagation.Factory bean Brave needs, gated on management.tracing.enabled and
+    # management.tracing.baggage.enabled matching EXACT explicit values; even setting every one of
+    # those explicitly still left the winning branch's own nested @ConditionalOnProperty unmatched
+    # in this exact combination of dependencies and version. Rather than fight three interacting
+    # conditions to reach an internal, undocumented combination, TracingConfig declares the
+    # Propagation.Factory bean directly -- see that class for the actual fix.
     sampling:
       # Trace EVERY request. Correct here and wrong in production: this is a demonstration
       # where a missing trace defeats the point, and the volume is a developer's own traffic.

@@ -92,8 +92,45 @@ public abstract class KafkaPostgresIT extends PostgresIT {
 	 * Reads at least {@code minCount} records from {@code topic}, from the beginning, waiting up to
 	 * {@code timeout}. A fresh, randomly named consumer group every call, so tests never see each
 	 * other's committed offsets.
+	 *
+	 * <p>WHY this is for "how many total records arrived" questions only, never for "did MY specific
+	 * message arrive": {@code topic} is shared across every test in a class (and across classes
+	 * sharing this broker), so once earlier tests have published anything at all, a call asking for
+	 * only {@code minCount = 1} can satisfy itself from an EARLIER test's leftover message and stop
+	 * polling before it ever reaches the one this particular call actually cares about. Looking for
+	 * one specific message belonging to this call needs {@link #consumeUntil}, which does not stop
+	 * until it finds what it is actually looking for.
 	 */
 	protected static List<ConsumerRecord<String, String>> consume(String topic, int minCount, Duration timeout) {
+		return poll(topic, timeout, collected -> collected.size() >= minCount);
+	}
+
+	/**
+	 * Reads from {@code topic}, from the beginning, until a record matching {@code found} appears or
+	 * {@code timeout} elapses — whichever comes first. Returns everything collected, so the caller can
+	 * still inspect the full list (headers included) rather than only the one record that satisfied
+	 * the predicate.
+	 *
+	 * <p>This is the one to reach for whenever a test is looking for ITS OWN message on a topic other
+	 * tests have already written to — which is every test that keys a record by a freshly generated
+	 * id and then goes looking for that exact key. {@link #consume(String, int, Duration)}'s
+	 * "stop once N records have arrived" rule would happily stop on someone else's message first.
+	 */
+	protected static List<ConsumerRecord<String, String>> consumeUntil(
+			String topic, Duration timeout, java.util.function.Predicate<ConsumerRecord<String, String>> found) {
+		return poll(topic, timeout, collected -> collected.stream().anyMatch(found));
+	}
+
+	/**
+	 * The general form behind both {@link #consume} and {@link #consumeUntil}: keeps polling
+	 * {@code topic} until {@code done} is satisfied by everything collected so far, or {@code timeout}
+	 * elapses. Reach for this directly when neither convenience method's stopping rule fits — for
+	 * example "stop once at least N records belonging to MY OWN set of keys have arrived", which needs
+	 * to both ignore other tests' unrelated messages on the shared topic and still wait for a count
+	 * rather than just the first match.
+	 */
+	protected static List<ConsumerRecord<String, String>> poll(
+			String topic, Duration timeout, java.util.function.Predicate<List<ConsumerRecord<String, String>>> done) {
 		Properties config = new Properties();
 		config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
 		config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
@@ -105,10 +142,11 @@ public abstract class KafkaPostgresIT extends PostgresIT {
 		try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(config)) {
 			consumer.subscribe(List.of(topic));
 
-			// Bounded by wall clock as well as by count, so a message the relay never sends fails this
-			// call with a clear "only got 3 of 5" rather than hanging the build until Maven is killed.
+			// Bounded by wall clock as well as by the "done" predicate, so a message the relay never
+			// sends fails this call with a clear, incomplete result rather than hanging the build
+			// until Maven is killed.
 			Instant deadline = Instant.now().plus(timeout);
-			while (collected.size() < minCount && Instant.now().isBefore(deadline)) {
+			while (!done.test(collected) && Instant.now().isBefore(deadline)) {
 				ConsumerRecords<String, String> batch = consumer.poll(Duration.ofMillis(300));
 				batch.forEach(collected::add);
 			}

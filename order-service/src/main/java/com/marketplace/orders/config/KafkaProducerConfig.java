@@ -59,6 +59,23 @@ public class KafkaProducerConfig {
 		// here rather than a client default someone has to look up).
 		config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
 
+		// WHY these three are shortened from Kafka's defaults: the relay processes one row at a time
+		// inside a single transaction, and a row aimed at a channel that cannot be reached -- the
+		// exact scenario a poisoned row creates on purpose -- would otherwise tie up that whole poll
+		// cycle for a long time before its send() future ever completes, delaying every healthy row
+		// queued behind it in the same batch.
+		//
+		// max.block.ms is the one that actually governs this case, discovered by watching it happen
+		// rather than by assumption: when a topic's metadata cannot be fetched at all (exactly what
+		// "no such channel" produces with auto-creation off), the client's own error is literally
+		// "Topic ... not present in metadata after 60000 ms" -- max.block.ms's default -- regardless
+		// of how delivery.timeout.ms is set, since that setting bounds retries AFTER a request is
+		// underway, not the initial wait for metadata. All three are set together so no failure mode
+		// this relay can hit is left waiting on an unshortened default.
+		config.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 5_000);
+		config.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5_000);
+		config.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10_000);
+
 		return new DefaultKafkaProducerFactory<>(config);
 	}
 

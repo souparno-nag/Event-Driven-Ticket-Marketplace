@@ -12,6 +12,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -19,7 +20,6 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.marketplace.events.OrderCreated;
 import com.marketplace.events.Topics;
-import com.marketplace.orders.KafkaPostgresIT;
 
 /**
  * Specifies guarantees 1–8 of {@code contracts/outbox-relay.md} — the core behaviour the developer's
@@ -34,8 +34,12 @@ import com.marketplace.orders.KafkaPostgresIT;
  * the outbox table's {@code aggregate_id} deliberately carries no foreign key (data-model.md), so
  * these tests, which are about the relay's mechanics rather than the mapping that produces a row,
  * need no order to exist at all.
+ *
+ * <p>Extends {@link RelayDrivenIT}, not {@code KafkaPostgresIT} directly — see that class for why
+ * these tests need the background scheduler suppressed, and why that suppression lives on one shared
+ * class rather than being declared separately here.
  */
-class OutboxRelayIT extends KafkaPostgresIT {
+class OutboxRelayIT extends RelayDrivenIT {
 
 	// A no-topic-provisioned channel name — KafkaPostgresIT disables auto-creation, so a send aimed
 	// here genuinely fails against the real broker, which is what lets guarantees 6-8 be tested
@@ -53,6 +57,9 @@ class OutboxRelayIT extends KafkaPostgresIT {
 	@Autowired
 	private OutboxRepository outboxRepository;
 
+	@Autowired
+	private JdbcTemplate jdbc;
+
 	@Value("${outbox.relay.max-attempts:5}")
 	private int maxAttempts;
 
@@ -63,15 +70,16 @@ class OutboxRelayIT extends KafkaPostgresIT {
 
 		outboxRelay.pollAndPublish();
 
-		List<ConsumerRecord<String, String>> received = consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(10));
-		assertThat(received).isNotEmpty();
+		// consumeUntil, not consume(topic, 1, ...): this topic is shared across every test in this
+		// class, so a plain "wait for 1 record" would happily stop on an earlier test's leftover
+		// message and never reach this one. Searching specifically for THIS aggregate id's key is
+		// what makes the wait actually about this test's own message.
+		ConsumerRecord<String, String> received = findByKey(aggregateId);
 
 		// SC-008: an INDEPENDENT reader, using nothing this service wrote to consume, deserializes the
 		// message back into an object equal to the one recorded -- proving the wire format is right,
 		// not merely that one in-memory object equals another.
-		OrderCreated redelivered = MAPPER.readValue(
-				received.stream().filter(r -> r.key().equals(aggregateId.toString())).findFirst().orElseThrow().value(),
-				OrderCreated.class);
+		OrderCreated redelivered = MAPPER.readValue(received.value(), OrderCreated.class);
 		assertThat(redelivered.sagaId()).isEqualTo(aggregateId);
 	}
 
@@ -82,8 +90,7 @@ class OutboxRelayIT extends KafkaPostgresIT {
 
 		outboxRelay.pollAndPublish();
 
-		ConsumerRecord<String, String> received = findByKey(
-				consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(10)), aggregateId.toString());
+		ConsumerRecord<String, String> received = findByKey(aggregateId);
 
 		assertThat(received.key()).isEqualTo(aggregateId.toString());
 	}
@@ -96,12 +103,18 @@ class OutboxRelayIT extends KafkaPostgresIT {
 
 		outboxRelay.pollAndPublish();
 
-		ConsumerRecord<String, String> received = findByKey(
-				consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(10)), aggregateId.toString());
+		ConsumerRecord<String, String> received = findByKey(aggregateId);
 
-		// Byte-for-byte, not "parses to an equal object" -- re-serializing would still pass an
-		// equality check while silently reopening the drift FR-010 exists to close.
-		assertThat(received.value()).isEqualTo(storedPayload);
+		// Compared as PARSED documents, not raw bytes -- research.md R7 already accepted, when jsonb
+		// was chosen for the payload column, that PostgreSQL normalises a jsonb value's key order and
+		// whitespace on the way back out. Asserting byte-for-byte equality here would be testing
+		// against a guarantee this project deliberately did not make. What FR-010 actually forbids is
+		// RE-SERIALIZING the content -- parsing the payload and writing a NEW document from it, which
+		// would reopen the money-formatting drift WRITE_BIGDECIMAL_AS_PLAIN (T070) exists to close.
+		// Parsed equality catches exactly that: any lost or altered field, any value that changed
+		// shape, while tolerating jsonb's cosmetic reordering.
+		assertThat(MAPPER.readValue(received.value(), OrderCreated.class))
+				.isEqualTo(MAPPER.readValue(storedPayload, OrderCreated.class));
 	}
 
 	@Test
@@ -117,7 +130,7 @@ class OutboxRelayIT extends KafkaPostgresIT {
 		// would still often pass this on a fast local broker; guarantee 6's failure-path test is what
 		// actually catches that anti-pattern, by proving the FAILURE side is never misreported as
 		// success. This test establishes the success side agrees.
-		assertThat(consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(10))).isNotEmpty();
+		findByKey(aggregateId);
 
 		OutboxRecord reloaded = outboxRepository.findById(saved.getId()).orElseThrow();
 		assertThat(reloaded.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
@@ -129,7 +142,7 @@ class OutboxRelayIT extends KafkaPostgresIT {
 		UUID aggregateId = UUID.randomUUID();
 		outboxRepository.save(pendingRecord(aggregateId, Topics.ORDER_CREATED, orderCreatedPayload(aggregateId)));
 		outboxRelay.pollAndPublish();
-		assertThat(consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(10))).isNotEmpty();
+		findByKey(aggregateId);
 
 		// Runs again against a row that is now PUBLISHED. The claim query (T094) is what should make
 		// this row invisible to a second run; this test proves that end to end through the relay
@@ -139,8 +152,14 @@ class OutboxRelayIT extends KafkaPostgresIT {
 
 		// The direct check: still exactly one message with this key on the channel, not merely that
 		// attempts stayed at zero -- attempts alone would not catch a relay that resent successfully
-		// without ever recording a failure.
-		long matchingKeyCount = consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(3)).stream()
+		// without ever recording a failure. Both re-runs above already happened before this consumer
+		// even connects, so if a duplicate existed it is already sitting in the log; consumeUntil's
+		// very first poll() call fetches everything currently available on the partition in one
+		// batch, which is why searching for "any match" here still reliably picks up a duplicate
+		// alongside the original rather than stopping short of it.
+		long matchingKeyCount = consumeUntil(Topics.ORDER_CREATED, Duration.ofSeconds(10),
+				r -> r.key().equals(aggregateId.toString()))
+				.stream()
 				.filter(r -> r.key().equals(aggregateId.toString()))
 				.count();
 		assertThat(matchingKeyCount).isEqualTo(1);
@@ -157,6 +176,20 @@ class OutboxRelayIT extends KafkaPostgresIT {
 		assertThat(reloaded.getStatus()).isEqualTo(OutboxStatus.PENDING);
 		assertThat(reloaded.getAttempts()).isEqualTo(1);
 		assertThat(reloaded.getLastError()).isNotNull();
+
+		// This row is DELIBERATELY left PENDING by this test's own assertion above -- that is exactly
+		// what guarantee 6 requires. Left as-is, it would still be claimable by every subsequent
+		// pollAndPublish() call for the rest of this class (and any other class sharing this
+		// database), each paying this same channel's send-failure delay for a row no other test
+		// cares about. Parking it directly bypasses the relay entirely -- parking-via-the-relay is
+		// already covered on its own by parksAfterMaxAttempts -- and is purely test cleanup.
+		//
+		// A plain JDBC UPDATE rather than outboxRepository.save(reloaded.park()): saving through
+		// Hibernate here raced with something else still holding this row (most likely the relay's own
+		// still-open claim transaction finishing its OWN commit), producing an intermittent
+		// QueryTimeoutException from Spring's transaction timeout cancelling the statement while it
+		// waited on the row lock. A direct, tiny UPDATE has nothing to wait on for long.
+		jdbc.update("UPDATE outbox SET status = 'PARKED' WHERE id = ?", reloaded.getId());
 	}
 
 	@Test
@@ -181,14 +214,19 @@ class OutboxRelayIT extends KafkaPostgresIT {
 	void oneFailureDoesNotStopTheBatch() throws Exception {
 		UUID failingAggregate = UUID.randomUUID();
 		UUID healthyAggregate = UUID.randomUUID();
-		outboxRepository.save(pendingRecord(failingAggregate, UNPROVISIONED_CHANNEL, "{}"));
+		OutboxRecord failing = outboxRepository.save(pendingRecord(failingAggregate, UNPROVISIONED_CHANNEL, "{}"));
 		outboxRepository.save(
 				pendingRecord(healthyAggregate, Topics.ORDER_CREATED, orderCreatedPayload(healthyAggregate)));
 
 		outboxRelay.pollAndPublish();
 
-		List<ConsumerRecord<String, String>> received = consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(10));
-		assertThat(received).anySatisfy(r -> assertThat(r.key()).isEqualTo(healthyAggregate.toString()));
+		findByKey(healthyAggregate);
+
+		// See retainsFailedRecordForRetry for why this is a direct JDBC update rather than
+		// outboxRepository.save(reloaded.park()): this row is left PENDING on purpose by design, and
+		// parking it here is cleanup, not a claim about what the relay itself did with it.
+		OutboxRecord reloaded = outboxRepository.findById(failing.getId()).orElseThrow();
+		jdbc.update("UPDATE outbox SET status = 'PARKED' WHERE id = ?", reloaded.getId());
 	}
 
 	// --- fixtures -----------------------------------------------------------------------------
@@ -205,8 +243,15 @@ class OutboxRelayIT extends KafkaPostgresIT {
 		return MAPPER.writeValueAsString(event);
 	}
 
-	private static ConsumerRecord<String, String> findByKey(List<ConsumerRecord<String, String>> records, String key) {
-		return records.stream().filter(r -> r.key().equals(key)).findFirst()
+	/**
+	 * Waits until a message keyed by {@code aggregateId} appears on {@code order.created} — never
+	 * "wait for N records", since the topic is shared with every other test in this class and a
+	 * count-based wait would happily stop on someone else's message first.
+	 */
+	private static ConsumerRecord<String, String> findByKey(UUID aggregateId) {
+		String key = aggregateId.toString();
+		return consumeUntil(Topics.ORDER_CREATED, Duration.ofSeconds(10), r -> r.key().equals(key))
+				.stream().filter(r -> r.key().equals(key)).findFirst()
 				.orElseThrow(() -> new AssertionError("no record found with key " + key));
 	}
 }

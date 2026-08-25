@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import com.marketplace.events.Topics;
-import com.marketplace.orders.KafkaPostgresIT;
 import com.marketplace.orders.domain.Order;
 import com.marketplace.orders.domain.OrderRepository;
 
@@ -30,8 +29,11 @@ import io.micrometer.tracing.Tracer;
  * the trace-continuity story {@link OutboxWriter} started in T081: that class captures the context
  * <em>onto the row</em> at write time; this relay is what must put it back <em>into the outgoing
  * message</em> at send time. Between the two, {@code OutboxRecord} carries it across the gap.
+ *
+ * <p>Extends {@link RelayDrivenIT} — see that class for why these tests need the background scheduler
+ * suppressed, and why the suppression lives on one shared class rather than here.
  */
-class OutboxTracingIT extends KafkaPostgresIT {
+class OutboxTracingIT extends RelayDrivenIT {
 
 	@Autowired
 	private OutboxRelay outboxRelay;
@@ -75,8 +77,10 @@ class OutboxTracingIT extends KafkaPostgresIT {
 		// creates between accepting a request and eventually sending its message.
 		outboxRelay.pollAndPublish();
 
-		ConsumerRecord<String, String> received = consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(10))
-				.stream().filter(r -> r.key().equals(order.getId().toString())).findFirst().orElseThrow();
+		String key = order.getId().toString();
+		ConsumerRecord<String, String> received = consumeUntil(Topics.ORDER_CREATED, Duration.ofSeconds(10),
+				r -> r.key().equals(key))
+				.stream().filter(r -> r.key().equals(key)).findFirst().orElseThrow();
 
 		Header header = received.headers().lastHeader("traceparent");
 		assertThat(header).as("the outgoing message must carry a traceparent header").isNotNull();
@@ -97,8 +101,10 @@ class OutboxTracingIT extends KafkaPostgresIT {
 
 		outboxRelay.pollAndPublish();
 
-		ConsumerRecord<String, String> received = consume(Topics.ORDER_CREATED, 1, Duration.ofSeconds(10))
-				.stream().filter(r -> r.key().equals(aggregateId.toString())).findFirst().orElseThrow();
+		String key = aggregateId.toString();
+		ConsumerRecord<String, String> received = consumeUntil(Topics.ORDER_CREATED, Duration.ofSeconds(10),
+				r -> r.key().equals(key))
+				.stream().filter(r -> r.key().equals(key)).findFirst().orElseThrow();
 
 		assertThat(received.headers().lastHeader("traceparent"))
 				.as("no header was ever stored, so none should be invented on the way out")

@@ -117,6 +117,20 @@
 			<artifactId>zipkin-reporter-brave</artifactId>
 		</dependency>
 
+		<!--
+		  Declared explicitly rather than left as a transitive dependency, because TracingConfig
+		  imports its classes directly. It was already on the classpath either way, pulled in
+		  transitively by micrometer-tracing-bridge-brave; Spring Boot's own autoconfiguration
+		  just never assembles it into a working Propagator bean in this version (see
+		  TracingConfig's javadoc). No version is managed for this artifact by Spring Boot's BOM,
+		  so it is pinned here to the exact version already resolving transitively.
+		-->
+		<dependency>
+			<groupId>io.zipkin.contrib.brave-propagation-w3c</groupId>
+			<artifactId>brave-propagation-tracecontext</artifactId>
+			<version>0.2.0</version>
+		</dependency>
+
 		<!-- Turns the actuator's metrics into the Prometheus scrape format. -->
 		<dependency>
 			<groupId>io.micrometer</groupId>

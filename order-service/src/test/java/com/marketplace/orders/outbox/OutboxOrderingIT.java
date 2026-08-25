@@ -7,11 +7,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
@@ -22,7 +24,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.marketplace.events.Topics;
-import com.marketplace.orders.KafkaPostgresIT;
 
 /**
  * Specifies guarantee 12 of {@code contracts/outbox-relay.md} — rows for one order reach the channel
@@ -36,8 +37,11 @@ import com.marketplace.orders.KafkaPostgresIT;
  * lives in the predicate the claim query uses to select rows, not in the relay method's own logic.
  * This test exercises that guarantee end to end, through the whole relay, rather than by inspecting
  * the query's SQL in isolation.
+ *
+ * <p>Extends {@link RelayDrivenIT} — see that class for why these tests need the background scheduler
+ * suppressed, and why the suppression lives on one shared class rather than here.
  */
-class OutboxOrderingIT extends KafkaPostgresIT {
+class OutboxOrderingIT extends RelayDrivenIT {
 
 	private static final int ORDER_COUNT = 100;
 	private static final int ROWS_PER_ORDER = 3;
@@ -74,11 +78,22 @@ class OutboxOrderingIT extends KafkaPostgresIT {
 
 		runConcurrentlyUntilDrained();
 
-		List<ConsumerRecord<String, String>> consumed =
-				consume(Topics.ORDER_CREATED, ORDER_COUNT * ROWS_PER_ORDER, Duration.ofSeconds(90));
+		// The channel is shared with every other Phase 4 test class in this same run, so filtering to
+		// exactly the keys THIS test created -- before parsing anything -- is what keeps an unrelated
+		// message (one with no "seq" field at all) from crashing the parse below, and keeps the
+		// "enough records have arrived" wait from being satisfied by someone else's messages instead
+		// of this test's own 300.
+		Set<String> myKeys = idsByOrder.keySet().stream().map(UUID::toString).collect(Collectors.toSet());
+		int expectedTotal = ORDER_COUNT * ROWS_PER_ORDER;
+
+		List<ConsumerRecord<String, String>> consumed = poll(Topics.ORDER_CREATED, Duration.ofSeconds(90),
+				collected -> collected.stream().filter(r -> myKeys.contains(r.key())).count() >= expectedTotal);
 
 		Map<String, List<Integer>> seqByKey = new LinkedHashMap<>();
 		for (ConsumerRecord<String, String> record : consumed) {
+			if (!myKeys.contains(record.key())) {
+				continue;
+			}
 			int seq = MAPPER.readTree(record.value()).get("seq").asInt();
 			seqByKey.computeIfAbsent(record.key(), k -> new ArrayList<>()).add(seq);
 		}

@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -19,7 +21,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.marketplace.events.Topics;
-import com.marketplace.orders.KafkaPostgresIT;
 
 /**
  * Specifies guarantee 11 of {@code contracts/outbox-relay.md}: two — here, three — relays running
@@ -34,8 +35,11 @@ import com.marketplace.orders.KafkaPostgresIT;
  * is entirely about the database, not about how many JVMs are asking it questions. Three real
  * application instances would exercise the identical database behaviour at a much higher cost to
  * start.
+ *
+ * <p>Extends {@link RelayDrivenIT} — see that class for why these tests need the background scheduler
+ * suppressed, and why the suppression lives on one shared class rather than here.
  */
-class OutboxConcurrencyIT extends KafkaPostgresIT {
+class OutboxConcurrencyIT extends RelayDrivenIT {
 
 	private static final int ROW_COUNT = 1000;
 	private static final int RELAY_THREADS = 3;
@@ -52,10 +56,12 @@ class OutboxConcurrencyIT extends KafkaPostgresIT {
 	@Test
 	void noRecordSentTwice() throws Exception {
 		List<Long> ids = new ArrayList<>(ROW_COUNT);
+		Set<String> myKeys = new HashSet<>();
 		for (int i = 0; i < ROW_COUNT; i++) {
-			OutboxRecord record = new OutboxRecord(
-					UUID.randomUUID(), Topics.ORDER_CREATED, "{\"n\":" + i + "}", null, null);
+			UUID aggregateId = UUID.randomUUID();
+			OutboxRecord record = new OutboxRecord(aggregateId, Topics.ORDER_CREATED, "{\"n\":" + i + "}", null, null);
 			ids.add(outboxRepository.save(record).getId());
+			myKeys.add(aggregateId.toString());
 		}
 
 		ExecutorService pool = Executors.newFixedThreadPool(RELAY_THREADS);
@@ -75,9 +81,21 @@ class OutboxConcurrencyIT extends KafkaPostgresIT {
 		assertThat(saved).as("every row ends up PUBLISHED").allSatisfy(
 				r -> assertThat(r.getStatus()).isEqualTo(OutboxStatus.PUBLISHED));
 
-		List<ConsumerRecord<String, String>> consumed = consume(Topics.ORDER_CREATED, ROW_COUNT, Duration.ofSeconds(60));
+		// Filtered to exactly the keys THIS test created, and waited-for by that same filtered count --
+		// the channel is shared with every other Phase 4 test class in this run, so a plain "wait for
+		// 1000 records" could be satisfied early by a mix of other tests' messages and this test's own,
+		// without ever actually confirming all 1000 of these specific rows arrived.
+		List<ConsumerRecord<String, String>> consumed = poll(Topics.ORDER_CREATED, Duration.ofSeconds(60),
+				collected -> collected.stream().filter(r -> myKeys.contains(r.key())).count() >= ROW_COUNT);
+
 		Map<String, Long> countsByKey = consumed.stream()
+				.filter(r -> myKeys.contains(r.key()))
 				.collect(Collectors.groupingBy(ConsumerRecord::key, Collectors.counting()));
+
+		// Anti-vacuity: the count-per-key assertion below would also pass if half the rows never
+		// arrived at all, since "count == 1" says nothing about rows that show up zero times.
+		assertThat(countsByKey).as("every one of the %d rows this test created was seen", ROW_COUNT)
+				.hasSize(ROW_COUNT);
 
 		// The direct assertion this guarantee is about: no key was ever sent more than once, no
 		// matter how many relays raced to claim rows at the same moment.

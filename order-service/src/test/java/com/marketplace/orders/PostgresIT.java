@@ -72,4 +72,34 @@ public abstract class PostgresIT {
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);
 	}
+
+	/**
+	 * Shrinks the pool every test context opens, from the production value of 20 down to 5.
+	 *
+	 * <p>Found by running Phase 3 and Phase 4 together and hitting {@code FATAL: sorry, too many
+	 * clients already} even after {@link com.marketplace.orders.outbox.RelayDrivenIT} cut four
+	 * duplicate contexts down to one shared one: Spring's test context cache still keys on which
+	 * class declares a {@code @DynamicPropertySource}, so this suite genuinely runs several distinct
+	 * cached contexts at once — one for plain {@code PostgresIT} subclasses, one for
+	 * {@code KafkaPostgresIT}'s own (the one Phase 4 class that must keep the real scheduling
+	 * interval), one for {@code RelayDrivenIT}'s four, and one more for the {@code @MockBean} nested
+	 * class in {@code OrderAcceptanceIT} (a mocked bean still gets its own distinct context). Each
+	 * eagerly opens its full pool on startup, since HikariCP's default minimum-idle equals its
+	 * maximum-pool-size. Four contexts at the production size of 20 is 80 connections, uncomfortably
+	 * close to (and in practice enough to tip over) this container's actual default of 100 — the
+	 * {@code max_connections=50} figure elsewhere in this codebase is what production's docker-compose
+	 * sets for its own PostgreSQL; this Testcontainers instance runs unmodified, so it defaults to 100,
+	 * not 50. Overriding it here, once, on the one class every test context already shares, keeps every
+	 * combination of contexts this suite can form comfortably under that limit without touching
+	 * production's own pool size, which is a deliberate admission-control choice (R5, FR-035) this
+	 * override must not disturb.
+	 *
+	 * <p>{@code OrderCapacityIT} still passes unmodified: it reads {@code getMaximumPoolSize()} off the
+	 * live {@code HikariDataSource} rather than assuming 20, precisely so a change like this one
+	 * wouldn't invalidate it.
+	 */
+	@DynamicPropertySource
+	static void shrinkPoolForTests(DynamicPropertyRegistry registry) {
+		registry.add("spring.datasource.hikari.maximum-pool-size", () -> "5");
+	}
 }

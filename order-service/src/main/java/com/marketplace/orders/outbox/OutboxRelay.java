@@ -1,11 +1,19 @@
 package com.marketplace.orders.outbox;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.micrometer.tracing.Span;
 import io.micrometer.tracing.propagation.Propagator;
 
 /**
@@ -97,10 +105,90 @@ public class OutboxRelay {
 	 * of one run to the START of the next, so a run that takes longer than the interval can never
 	 * overlap the one behind it. A fixed rate would start runs on a strict clock regardless of whether
 	 * the previous one had finished.
+	 *
+	 * <p>WHY {@code timeout = 30} rather than the 3-second default {@code application.yml} sets for
+	 * every other transaction: that default was chosen for the order-acceptance path, where a slow
+	 * store should degrade into a fast HTTP refusal (FR-035). This method has a different risk
+	 * profile entirely — a single poisoned row failing to send can legitimately take several seconds
+	 * on its own (bounded by the producer's {@code max.block.ms}/{@code delivery.timeout.ms},
+	 * T095), and a batch can contain more than one such row. Inheriting the 3-second default here
+	 * would make the transaction's own commit fail with "transaction timeout expired" on completely
+	 * ordinary, already-handled send failures — turning a retryable single-row problem this method's
+	 * own try/catch already deals with into a whole-batch abort neither this method nor its caller
+	 * asked for. Thirty seconds is generous for a background poll cycle nothing is waiting on
+	 * synchronously, while still bounded rather than left to run indefinitely.
 	 */
 	@Scheduled(fixedDelayString = "${outbox.relay.poll-interval-ms:500}")
-	@Transactional
+	@Transactional(timeout = 30)
 	public void pollAndPublish() {
-		// TODO(developer)
+		List<OutboxRecord> claimed = outboxRepository.claimBatch(batchSize);
+
+		// One row's failure must never abandon the rows behind it (guarantee 8) -- so the try/catch
+		// below is scoped to a SINGLE row inside this loop, never around the loop as a whole.
+		for (OutboxRecord record : claimed) {
+			ProducerRecord<String, String> producerRecord = new ProducerRecord<>(
+					record.getEventType(), record.getAggregateId().toString(), record.getPayload());
+
+			attachTraceHeaders(record, producerRecord);
+
+			try {
+				// .get() is the whole guarantee here: it blocks until the broker has actually
+				// acknowledged the message (or thrown), so "marked PUBLISHED" can only ever mean "the
+				// broker has it" (guarantee 4). Calling send() and moving on without waiting would
+				// let this method mark a row sent that never really left the building.
+				kafkaTemplate.send(producerRecord).get();
+
+				record.markPublished(Instant.now());
+				metrics.recordPublished();
+			} catch (Exception e) {
+				record.recordFailure(describeFailure(e));
+				metrics.recordSendFailure();
+
+				if (record.getAttempts() >= maxAttempts) {
+					record.park();
+				}
+			}
+		}
+
+		// No explicit outboxRepository.save(record) anywhere above: every record in `claimed` is
+		// already managed by this transaction's persistence context (claimBatch loaded them), so
+		// Hibernate writes back whatever markPublished/recordFailure/park changed when this
+		// @Transactional method commits. This is JPA's own "dirty checking" -- it applies to entities
+		// already loaded in the current transaction, which is exactly what these are.
+	}
+
+	/**
+	 * Reconstructs the trace that was active when this row was written, starts a new span
+	 * representing this publish, and writes THAT span's context onto the outgoing message as headers
+	 * (guarantee 9). A row with nothing stored is left completely untouched — no header is invented
+	 * for a context that was never captured (guarantee 10).
+	 */
+	private void attachTraceHeaders(OutboxRecord record, ProducerRecord<String, String> producerRecord) {
+		if (record.getTraceparent() == null) {
+			return;
+		}
+
+		Map<String, String> stored = new HashMap<>();
+		stored.put("traceparent", record.getTraceparent());
+		if (record.getTracestate() != null) {
+			stored.put("tracestate", record.getTracestate());
+		}
+
+		Span publishSpan = propagator.extract(stored, Map::get).name("outbox.publish").start();
+		try {
+			Map<String, String> outgoing = new HashMap<>();
+			propagator.inject(publishSpan.context(), outgoing, Map::put);
+			outgoing.forEach((key, value) ->
+					producerRecord.headers().add(key, value.getBytes(StandardCharsets.UTF_8)));
+		} finally {
+			publishSpan.end();
+		}
+	}
+
+	/** A short, greppable description of why a send failed, for {@code last_error} (guarantee 6). */
+	private static String describeFailure(Exception e) {
+		Throwable cause = e.getCause() != null ? e.getCause() : e;
+		String message = cause.getMessage();
+		return cause.getClass().getSimpleName() + (message != null ? ": " + message : "");
 	}
 }
