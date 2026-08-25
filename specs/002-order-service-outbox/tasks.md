@@ -152,7 +152,7 @@ every field against what was submitted.
 
 ### Tests for User Story 3
 
-- [ ] T102 [P] [US3] Create `order-service/src/test/java/com/marketplace/orders/api/OrderLookupIT.java` — asserts 200 with every submitted field returned unchanged, 404 for an unknown identifier, and 400 for an identifier that is not a well-formed UUID, with 404 and 400 carrying distinct problem `type` URIs (FR-020, FR-021, SC-010)
+- [X] T102 [P] [US3] Create `order-service/src/test/java/com/marketplace/orders/api/OrderLookupIT.java` — asserts 200 with every submitted field returned unchanged, 404 for an unknown identifier, and 400 for an identifier that is not a well-formed UUID, with 404 and 400 carrying distinct problem `type` URIs (FR-020, FR-021, SC-010)
 
 ### Implementation for User Story 3
 
