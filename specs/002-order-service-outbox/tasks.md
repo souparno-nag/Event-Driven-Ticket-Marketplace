@@ -166,14 +166,14 @@ every field against what was submitted.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T106 [P] Verify `/actuator/prometheus` exposes all five meters from R12 with the expected names, and that the two gauges read live database state rather than a cached value (FR-024, FR-031)
+- [X] T106 [P] Verify `/actuator/prometheus` exposes all five meters from R12 with the expected names, and that the two gauges read live database state rather than a cached value (FR-024, FR-031)
 - [X] T107 [P] Update the profile documentation in `infra/.env` to record that the tracing criterion needs `COMPOSE_PROFILES=core,obs`, since Zipkin is not in the default `core` profile (R4)
-- [ ] T108 Run quickstart scenario S6 under `core,obs` and confirm one connected trace spans the accepting request and the later publish, rather than two unrelated traces (FR-026, SC-012)
-- [ ] T109 Run quickstart scenario S8 and record acceptance latency, sustained rate, and backlog drain time against the FR-032 and FR-033 targets. Note in the results that this is the interim check and step 9's k6 script supersedes it (SC-003, SC-014, SC-015)
+- [X] T108 Run quickstart scenario S6 under `core,obs` and confirm one connected trace spans the accepting request and the later publish, rather than two unrelated traces (FR-026, SC-012)
+- [X] T109 Run quickstart scenario S8 and record acceptance latency, sustained rate, and backlog drain time against the FR-032 and FR-033 targets. Note in the results that this is the interim check and step 9's k6 script supersedes it (SC-003, SC-014, SC-015)
 - [X] T110 [P] Update the repository `README.md` with the order-service section: what it owns, its port, and how to submit and read an order
 - [X] T111 [P] Audit every non-obvious line in `order-service/` for a WHY comment rather than a WHAT comment, and confirm each design decision with a real alternative carries a `TRADEOFF:` comment naming what was rejected and why (project constraints)
 - [X] T113 [P] Create `order-service/Dockerfile` — multi-stage build (Maven build stage, JRE 21 runtime stage), exposing 8081 and running the boot jar. Required by the project brief's "each service: own Dockerfile". Wiring it into `infra/docker-compose.yml` stays deferred: the roadmap's open question about whether `make up` builds jars first is answered at step 7, when the first project-built image (Eureka) joins the environment
-- [ ] T112 Walk quickstart scenarios S1 through S8 end to end on a clean `make down && make up`, confirming every success criterion in spec.md is either verified or explicitly recorded as deferred to a later step
+- [X] T112 Walk quickstart scenarios S1 through S8 end to end on a clean `make down && make up`, confirming every success criterion in spec.md is either verified or explicitly recorded as deferred to a later step
 
 ---
 
