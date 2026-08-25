@@ -157,7 +157,7 @@ every field against what was submitted.
 ### Implementation for User Story 3
 
 - [X] T103 [P] [US3] Create `order-service/src/main/java/com/marketplace/orders/api/OrderView.java` — a record carrying `orderId`, `userId`, `showId`, `seatIds`, `amount`, `status`, `createdAt`, `updatedAt`, per `contracts/orders-api.yaml`. Seats are returned sorted so the response is deterministic
-- [ ] T104 [US3] Add `GET /api/orders/{orderId}` to `order-service/src/main/java/com/marketplace/orders/api/OrderController.java`, returning `OrderView` (FR-020)
+- [X] T104 [US3] Add `GET /api/orders/{orderId}` to `order-service/src/main/java/com/marketplace/orders/api/OrderController.java`, returning `OrderView` (FR-020)
 - [ ] T105 [US3] Extend `order-service/src/main/java/com/marketplace/orders/api/ApiExceptionHandler.java` with an order-not-found problem type mapped to 404, distinct from the malformed-identifier 400 raised by path-variable conversion (FR-021)
 
 **Checkpoint**: All three stories independently functional. The step is demonstrable end to end.
