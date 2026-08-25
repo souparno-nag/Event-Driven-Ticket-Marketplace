@@ -37,7 +37,9 @@ import com.marketplace.events.Topics;
  * start.
  *
  * <p>Extends {@link RelayDrivenIT} — see that class for why these tests need the background scheduler
- * suppressed, and why the suppression lives on one shared class rather than here.
+ * suppressed, and why the suppression lives on one shared class rather than here. It was, in fact,
+ * the exact same mechanism (a stray, unsuppressed relay in an unrelated context) behind a row-loss bug
+ * this test used to hit under a full combined build — see {@code RelaySuppressedIT} for that story.
  */
 class OutboxConcurrencyIT extends RelayDrivenIT {
 

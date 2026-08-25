@@ -13,14 +13,14 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.marketplace.orders.PostgresIT;
+import com.marketplace.orders.RelaySuppressedIT;
 
 /**
  * Proves {@link Order}'s {@code @Version} column does what FR-022 requires: a concurrent update from
  * a stale copy is detected, not silently overwritten.
  *
  * <p>Depends only on classes that already exist ({@link Order}, {@link OrderRepository},
- * {@link PostgresIT}) — this is the one file in this batch that compiles and runs today, ahead of
+ * {@code PostgresIT}) — this is the one file in this batch that compiles and runs today, ahead of
  * the rest of User Story 1.
  *
  * <p>"Concurrent" is simulated by ordering, not by real threads: a copy is loaded and held (the
@@ -30,7 +30,7 @@ import com.marketplace.orders.PostgresIT;
  * provides — a save whose {@code WHERE id = ? AND version = ?} matches no row, because the version
  * moved on without it.
  */
-class OrderVersionIT extends PostgresIT {
+class OrderVersionIT extends RelaySuppressedIT {
 
 	@Autowired
 	private OrderRepository orderRepository;

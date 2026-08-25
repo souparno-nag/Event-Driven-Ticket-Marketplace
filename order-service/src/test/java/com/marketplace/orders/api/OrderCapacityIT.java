@@ -19,14 +19,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
-import com.marketplace.orders.PostgresIT;
+import com.marketplace.orders.RelaySuppressedIT;
 import com.zaxxer.hikari.HikariDataSource;
 
 /**
  * Specifies overload behaviour: when the connection pool is saturated, excess requests are refused
  * fast with 503 rather than queuing behind a slow default (FR-035, FR-036, SC-016).
  *
- * <p>Re-declares {@code @SpringBootTest} with {@code RANDOM_PORT}, replacing {@link PostgresIT}'s
+ * <p>Re-declares {@code @SpringBootTest} with {@code RANDOM_PORT}, replacing {@code PostgresIT}'s
  * inherited mock-web-environment for this class only — a real HTTP round trip against a genuinely
  * exhausted pool is the only way to observe this behaviour; MockMvc's synchronous, single-threaded
  * dispatch would not exhibit real connection contention.
@@ -42,7 +42,7 @@ import com.zaxxer.hikari.HikariDataSource;
  * saturation.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class OrderCapacityIT extends PostgresIT {
+class OrderCapacityIT extends RelaySuppressedIT {
 
 	@LocalServerPort
 	private int port;

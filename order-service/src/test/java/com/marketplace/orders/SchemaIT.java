@@ -23,7 +23,7 @@ import jakarta.persistence.EntityManagerFactory;
  * <p>This is the test that makes that impossible to miss, and it is also the first time anything in
  * this module has run against a real database.
  */
-class SchemaIT extends PostgresIT {
+class SchemaIT extends RelaySuppressedIT {
 
 	@Autowired
 	private JdbcTemplate jdbc;

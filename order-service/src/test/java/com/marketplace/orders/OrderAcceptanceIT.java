@@ -33,13 +33,14 @@ import com.marketplace.orders.service.OrderAcceptanceService;
  * Specifies the atomicity guarantee at the heart of this build step: the order row and its outbox
  * row are written in one transaction, or neither is (FR-007).
  *
- * <p>Extends {@link PostgresIT} rather than a Kafka-backed base — this story is about the database
- * write, not the send, and should not pay for a broker it never touches.
+ * <p>Extends {@link RelaySuppressedIT} rather than a Kafka-backed base — this story is about the
+ * database write, not the send, and should not pay for a broker it never touches. See that class for
+ * why even a Kafka-free context needs its background relay suppressed.
  *
  * <p>Will not compile until {@code CreateOrderRequest} (T079) and {@code OrderAcceptanceService}
  * (T082) exist. That is the intended state.
  */
-class OrderAcceptanceIT extends PostgresIT {
+class OrderAcceptanceIT extends RelaySuppressedIT {
 
 	@Autowired
 	private OrderAcceptanceService orderAcceptanceService;
@@ -106,7 +107,21 @@ class OrderAcceptanceIT extends PostgresIT {
 	 * <p>{@code @MockBean} inside a {@code @Nested} class gives this one test its own application
 	 * context with {@link OutboxRepository} replaced by a mock, while every other test in this file
 	 * keeps using the real one — a stubbed failure here must not contaminate the concurrency test
-	 * above.
+	 * above. It inherits {@link RelaySuppressedIT}'s suppression of the background poller from the
+	 * enclosing class, same as every other test in this file — no override needed here.
+	 *
+	 * <p>That suppression matters even for a MOCKED repository: this test used to fail with "expecting
+	 * code to raise a throwable" before the poller was suppressed everywhere, and the reason was worth
+	 * recording. {@code @EnableScheduling} means the relay genuinely fires in the background here too,
+	 * calling {@code outboxRepository.claimBatch(...)} on this class's mock from a separate thread —
+	 * found by watching {@code Mockito.mockingDetails(outboxRepository).getStubbings()} print
+	 * {@code claimBatch(100)} — not {@code save(any())} — as the target of this test's own
+	 * {@code when(outboxRepository.save(any())).thenThrow(...)} call: Mockito's "last invocation"
+	 * stubbing state is a single, non-thread-safe slot, and the scheduler thread's concurrent call to
+	 * the same mock won the race to occupy it between this thread's {@code save(any())} call and the
+	 * following {@code .thenThrow(...)}, silently attaching the exception to the wrong method. The
+	 * mock's real, but now-unrelated, {@code save()} call then went through unstubbed and returned
+	 * null instead of throwing.
 	 */
 	@Nested
 	class RollbackWhenTheOutboxWriteFails {

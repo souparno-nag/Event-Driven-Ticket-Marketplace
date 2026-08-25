@@ -31,6 +31,14 @@ import com.marketplace.orders.KafkaPostgresIT;
  * bounded wait times out with an honest failure naming exactly what never happened, the same "compiles
  * now, fails cleanly until the implementation lands" pattern used for {@code OrderApiIT} in the
  * previous batch.
+ *
+ * <p>WHY this class extends {@code KafkaPostgresIT} directly rather than {@code RelayDrivenIT}: it is
+ * the one test in the whole suite that genuinely needs the OPPOSITE of what every other Phase 4 class
+ * wants — real, automatic scheduling, at production speed, with no test-driven call to
+ * {@code pollAndPublish()} anywhere. Neither {@code KafkaPostgresIT} nor {@code PostgresIT} overrides
+ * the relay's scheduling properties, so this class simply gets the real defaults with no override of
+ * its own needed — see {@code RelayDrivenIT} and {@code RelaySuppressedIT} for where suppression lives
+ * for everyone else, and why it could not live on an ancestor of this class instead.
  */
 class OutboxRestartRecoveryIT extends KafkaPostgresIT {
 

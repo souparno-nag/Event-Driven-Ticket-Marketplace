@@ -14,7 +14,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.marketplace.orders.PostgresIT;
+import com.marketplace.orders.RelaySuppressedIT;
 import com.marketplace.orders.domain.OrderRepository;
 
 /**
@@ -31,7 +31,7 @@ import com.marketplace.orders.domain.OrderRepository;
  * system that does not yet answer it, rather than merely failing to parse.
  */
 @AutoConfigureMockMvc
-class OrderApiIT extends PostgresIT {
+class OrderApiIT extends RelaySuppressedIT {
 
 	@Autowired
 	private MockMvc mockMvc;

@@ -106,6 +106,23 @@ public class OutboxRelay {
 	 * overlap the one behind it. A fixed rate would start runs on a strict clock regardless of whether
 	 * the previous one had finished.
 	 *
+	 * <p>WHY {@code initialDelayString} exists, defaulting to {@code 0} everywhere except where a test
+	 * overrides it: {@code fixedDelayString} alone only bounds the gap BETWEEN runs — the very first
+	 * run fires close to immediately after the scheduler starts, regardless of how large the interval
+	 * is. That is exactly the behavior {@code OutboxRestartRecoveryIT} depends on (a restarted service
+	 * must resume publishing without a manual step, not after an initial wait), so the default of
+	 * {@code 0} is deliberate, not merely unconfigured. It is also what broke
+	 * {@code OrderAcceptanceIT$RollbackWhenTheOutboxWriteFails}: that test replaces
+	 * {@code OutboxRepository} with a Mockito mock, and this scheduled method calling
+	 * {@code claimBatch(...)} on that same mock from a background thread — even once, immediately at
+	 * startup — can race the test's own {@code when(...).thenThrow(...)} call on the main thread.
+	 * Mockito's "last invocation" stubbing state is a single, non-thread-safe slot; whichever thread's
+	 * call lands last wins it, so the background thread's call can silently attach the test's intended
+	 * exception to the wrong method. Raising {@code outbox.relay.poll-interval-ms} alone cannot fix
+	 * this, because it only postpones the SECOND run — the first one still fires immediately and still
+	 * races. That test overrides this property specifically, alongside the interval, to push even the
+	 * first run safely out of the way.
+	 *
 	 * <p>TRADEOFF: {@code timeout = 30} rather than the 3-second default {@code application.yml} sets
 	 * for every other transaction. That default was chosen for the order-acceptance path, where a slow
 	 * store should degrade into a fast HTTP refusal (FR-035). This method has a different risk
@@ -118,7 +135,9 @@ public class OutboxRelay {
 	 * asked for. Thirty seconds is generous for a background poll cycle nothing is waiting on
 	 * synchronously, while still bounded rather than left to run indefinitely.
 	 */
-	@Scheduled(fixedDelayString = "${outbox.relay.poll-interval-ms:500}")
+	@Scheduled(
+			fixedDelayString = "${outbox.relay.poll-interval-ms:500}",
+			initialDelayString = "${outbox.relay.initial-delay-ms:0}")
 	@Transactional(timeout = 30)
 	public void pollAndPublish() {
 		List<OutboxRecord> claimed = outboxRepository.claimBatch(batchSize);

@@ -21,6 +21,17 @@ import org.testcontainers.utility.DockerImageName;
  * is complete without a broker, and must be testable without one. Starting Kafka for those tests
  * would add several seconds to every run for a component none of them touch. Tests that genuinely
  * need a broker extend {@code KafkaPostgresIT} instead, which arrives in T088.
+ *
+ * <p>WHY this class does NOT suppress {@code OutboxRelay}'s background poller, even though every
+ * subclass has one running — see {@code RelaySuppressedIT} for that suppression and the bug it
+ * exists to prevent. It was tried here first, and broke {@code OutboxRestartRecoveryIT}: that class
+ * extends {@code KafkaPostgresIT}, which extends this one, and genuinely needs the OPPOSITE of
+ * suppression — real scheduling — to prove automatic recovery. Spring's test framework does not let a
+ * subclass reliably override a {@code @DynamicPropertySource} value an ancestor already registered
+ * for the same key; the ancestor's registration wins regardless of what a descendant declares
+ * afterwards. Since {@code OutboxRestartRecoveryIT} cannot escape being a descendant of this class,
+ * the suppression cannot live here — it has to live on a class that is a common ancestor of
+ * everything that wants it and of nothing that needs the opposite.
  */
 @SpringBootTest
 public abstract class PostgresIT {
@@ -77,16 +88,17 @@ public abstract class PostgresIT {
 	 * Shrinks the pool every test context opens, from the production value of 20 down to 5.
 	 *
 	 * <p>Found by running Phase 3 and Phase 4 together and hitting {@code FATAL: sorry, too many
-	 * clients already} even after {@link com.marketplace.orders.outbox.RelayDrivenIT} cut four
-	 * duplicate contexts down to one shared one: Spring's test context cache still keys on which
-	 * class declares a {@code @DynamicPropertySource}, so this suite genuinely runs several distinct
-	 * cached contexts at once — one for plain {@code PostgresIT} subclasses, one for
-	 * {@code KafkaPostgresIT}'s own (the one Phase 4 class that must keep the real scheduling
-	 * interval), one for {@code RelayDrivenIT}'s four, and one more for the {@code @MockBean} nested
-	 * class in {@code OrderAcceptanceIT} (a mocked bean still gets its own distinct context). Each
-	 * eagerly opens its full pool on startup, since HikariCP's default minimum-idle equals its
-	 * maximum-pool-size. Four contexts at the production size of 20 is 80 connections, uncomfortably
-	 * close to (and in practice enough to tip over) this container's actual default of 100 — the
+	 * clients already}. Spring's test context cache keys on which class declares each
+	 * {@code @DynamicPropertySource}, so this suite genuinely runs several distinct cached contexts at
+	 * once — one shared by every plain {@code PostgresIT} subclass via {@code RelaySuppressedIT}, one
+	 * shared by the four Phase 4 classes that call {@code pollAndPublish()} directly via
+	 * {@code RelayDrivenIT}, one for {@code OutboxRestartRecoveryIT}'s own (the one test that keeps
+	 * real scheduling, extending {@code KafkaPostgresIT} with no override of its own), and one more for
+	 * the {@code @MockBean} nested class in {@code OrderAcceptanceIT} (a mocked bean still gets its own
+	 * distinct context). Each eagerly opens its full pool on startup, since HikariCP's default
+	 * minimum-idle equals its maximum-pool-size. Four contexts at the production size of 20 is 80
+	 * connections, uncomfortably close to (and in practice enough to tip over) this container's actual
+	 * default of 100 — the
 	 * {@code max_connections=50} figure elsewhere in this codebase is what production's docker-compose
 	 * sets for its own PostgreSQL; this Testcontainers instance runs unmodified, so it defaults to 100,
 	 * not 50. Overriding it here, once, on the one class every test context already shares, keeps every
