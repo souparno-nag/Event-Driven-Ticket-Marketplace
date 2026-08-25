@@ -167,7 +167,7 @@ every field against what was submitted.
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 - [ ] T106 [P] Verify `/actuator/prometheus` exposes all five meters from R12 with the expected names, and that the two gauges read live database state rather than a cached value (FR-024, FR-031)
-- [ ] T107 [P] Update the profile documentation in `infra/.env` to record that the tracing criterion needs `COMPOSE_PROFILES=core,obs`, since Zipkin is not in the default `core` profile (R4)
+- [X] T107 [P] Update the profile documentation in `infra/.env` to record that the tracing criterion needs `COMPOSE_PROFILES=core,obs`, since Zipkin is not in the default `core` profile (R4)
 - [ ] T108 Run quickstart scenario S6 under `core,obs` and confirm one connected trace spans the accepting request and the later publish, rather than two unrelated traces (FR-026, SC-012)
 - [ ] T109 Run quickstart scenario S8 and record acceptance latency, sustained rate, and backlog drain time against the FR-032 and FR-033 targets. Note in the results that this is the interim check and step 9's k6 script supersedes it (SC-003, SC-014, SC-015)
 - [ ] T110 [P] Update the repository `README.md` with the order-service section: what it owns, its port, and how to submit and read an order
