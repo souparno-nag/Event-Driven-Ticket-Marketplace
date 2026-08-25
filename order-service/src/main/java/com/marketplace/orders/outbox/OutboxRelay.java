@@ -106,8 +106,8 @@ public class OutboxRelay {
 	 * overlap the one behind it. A fixed rate would start runs on a strict clock regardless of whether
 	 * the previous one had finished.
 	 *
-	 * <p>WHY {@code timeout = 30} rather than the 3-second default {@code application.yml} sets for
-	 * every other transaction: that default was chosen for the order-acceptance path, where a slow
+	 * <p>TRADEOFF: {@code timeout = 30} rather than the 3-second default {@code application.yml} sets
+	 * for every other transaction. That default was chosen for the order-acceptance path, where a slow
 	 * store should degrade into a fast HTTP refusal (FR-035). This method has a different risk
 	 * profile entirely — a single poisoned row failing to send can legitimately take several seconds
 	 * on its own (bounded by the producer's {@code max.block.ms}/{@code delivery.timeout.ms},
