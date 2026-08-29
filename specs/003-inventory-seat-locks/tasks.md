@@ -76,7 +76,7 @@ Multi-module Maven project, build root at the repository root. This step adds on
 ### Ported outbox
 
 - [X] T130 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/outbox/OutboxRecord.java` — ported from `order-service`, including the comment recording that identity order is not commit order
-- [ ] T131 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/outbox/OutboxRepository.java` — the `claimBatch(int)` native query ported unchanged, keeping its WHY and TRADEOFF comments (FR-026)
+- [X] T131 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/outbox/OutboxRepository.java` — the `claimBatch(int)` native query ported unchanged, keeping its WHY and TRADEOFF comments (FR-026)
 - [ ] T132 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/outbox/OutboxMetrics.java` — ported, retagged for this service
 - [ ] T133 Create `inventory-service/src/main/java/com/marketplace/inventory/outbox/OutboxRelay.java` — `pollAndPublish` ported **implemented**, not re-stubbed. Add a comment recording that this was the step-2 exercise and repeating it would teach nothing; the exercises in this step are the Lua scripts (R8, R11)
 
