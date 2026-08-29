@@ -1,0 +1,172 @@
+# inventory-service configuration.
+#
+# Values here are for LOCAL DEVELOPMENT against the Docker Compose environment in infra/.
+# Nothing in this file is a secret: the database credentials are the committed local-only pair
+# from build step 1, reachable from localhost alone and holding nothing but generated demo data.
+
+spring:
+  application:
+    name: inventory-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/marketplace
+    username: marketplace
+    password: marketplace
+
+    hikari:
+      # WHY 12 and not order-service's 20: PostgreSQL here is capped at max_connections=50
+      # (infra/docker-compose.yml). order-service already takes 20; this leaves room for
+      # payment-service and projection-service in steps 4 and 6 without anyone having to
+      # revisit the container. The test suite shrinks pools further still, to 5 per context,
+      # for the same reason (R12).
+      maximum-pool-size: 12
+
+      # Same admission-control reasoning as order-service's pool: a caller that cannot get a
+      # connection within a quarter of a second is told so promptly rather than joining a
+      # wall of requests all timing out together at the 30s default.
+      connection-timeout: 250
+
+      # Enforced by the database rather than the application, for the same reason as
+      # order-service: a 3s @Transactional timeout only starts once a connection has been
+      # handed over, and cannot interrupt a query already stuck inside the database on a
+      # lock wait or a runaway plan. statement_timeout cuts it off at the source.
+      connection-init-sql: SET statement_timeout = 3000
+
+  jpa:
+    hibernate:
+      # Flyway owns the schema; Hibernate only checks that the tables it finds match the
+      # entities and fails loudly if they do not. `validate` is what turns a forgotten or
+      # mis-ordered migration into a startup failure instead of a mystery at runtime.
+      ddl-auto: validate
+      # WHY this service needs a schema name Hibernate must be told explicitly, and
+      # order-service did not: order-service is the only tenant of the `marketplace`
+      # database's default (public) schema. inventory-service shares the same database
+      # instance but must not share its flyway_schema_history table with order-service's —
+      # two services racing to record migration history in one table is exactly the kind of
+      # bug that only appears the day both start at once. A dedicated schema gives this
+      # service its own history table and its own namespace with no compose change, no
+      # second database, and no new credentials (R12).
+      default-schema: inventory
+    properties:
+      hibernate:
+        # Log SQL readably when debugging. Off by default via the logging level below.
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Companion to hibernate.default_schema above, for the identical reason: without this,
+    # Flyway's own flyway_schema_history row lands in `public` and collides with
+    # order-service's the moment both services start against the same database.
+    schemas: inventory
+    default-schema: inventory
+
+  transaction:
+    default-timeout: 3s
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      # Bounds the one blocking call on this service's critical path (Principle IV — no
+      # unbounded-latency operation inline in an event-processing path). A Redis call that
+      # cannot complete within a second is treated as Redis being unreachable, not merely
+      # slow, and is routed by KafkaConsumerConfig as an undecidable request rather than
+      # answered with a seat refusal that was never really about the seats (FR-047, R9).
+      timeout: 1s
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      # Also the consumer_name written to processed_messages (FR-029). Two consumers in one
+      # service reading the same message would otherwise collide in that table under a
+      # shared name — not a concern yet, since this service has exactly one consumer, but the
+      # name is chosen to already be specific rather than generic.
+      group-id: inventory-service
+    listener:
+      # WHY false: this service's fast contention store (Redis) is wiped by every restart —
+      # infra/docker-compose.yml runs it with `--save ""`. Starting the listener immediately
+      # would let the first booking after a restart be judged against a store that has
+      # forgotten every existing hold, which is a double-booking with no error anywhere.
+      # SeatLockRebuilder (T179) replays every held, unlapsed reservation into Redis first
+      # and only then calls KafkaListenerEndpointRegistry#start() (FR-015, FR-016, R4).
+      auto-startup: false
+    # Error handling — DefaultErrorHandler, backoff, and the dead-letter destination
+    # resolver — is set in code in KafkaConsumerConfig (T177), not here, for the same
+    # reason order-service keeps its producer specifics in code: a value that must
+    # route failures correctly by classification is a correctness requirement, not an
+    # environment setting a file whose purpose is to be edited should be trusted with.
+
+# The seat hold itself. Every value is referenced by name from SeatLockScripts and
+# SeatLockStore, so a test can override the lifetime without touching code
+# (contracts/seat-lock-scripts.md).
+inventory:
+  hold:
+    # 120 seconds, exactly (FR-008). Not configurable per environment: the frozen contract's
+    # lockExpiresAt is computed from this value, and step 4's fencing check will compare
+    # against what was actually announced. Changing it changes what the rest of the saga is
+    # allowed to assume a hold is worth.
+    ttl-ms: 120000
+    # First segment of the Redis key: seat:{showId}:{seatId}. Broken out as its own property
+    # so a test can run an isolated keyspace against the same Redis instance rather than
+    # needing a second container.
+    key-prefix: seat
+
+  consumer:
+    # Deliveries attempted — the original plus three redeliveries — before a message that
+    # cannot be decided is routed to its dead-letter channel (FR-048). Bounded deliberately:
+    # unbounded retrying turns one poisonous message into a partition stalled forever with
+    # no operator signal.
+    max-attempts: 4
+    # Initial backoff before the first redelivery, doubling on each subsequent attempt
+    # (ExponentialBackOff in KafkaConsumerConfig). Short enough that an ordinary transient
+    # blip — a Redis reconnect, a brief Postgres failover — self-heals inside a few seconds.
+    backoff-ms: 500
+
+  sweeper:
+    # Tidy-up only, never load-bearing (R6) — a lapsed reservation is retired inline by
+    # whatever next contends for its seats, regardless of whether this runs at all.
+    # LapsedRebookingIT (T149) proves that by disabling it and rebooking anyway. Exposed as
+    # a property specifically so that test can turn it off without touching code.
+    enabled: true
+    fixed-delay-ms: 30000
+
+# The outbox relay — the second in the system, ported rather than shared (R8). Same shape and
+# same property names as order-service's, deliberately: this is the identical mechanism, and
+# giving it a different configuration surface here would be a difference with no reason behind
+# it.
+outbox:
+  relay:
+    poll-interval-ms: 500
+    batch-size: 100
+    max-attempts: 5
+
+server:
+  # 8081 is order-service. 8080 stays free for the API gateway in build step 7.
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    # See order-service/src/main/resources/application.yml for why this setting alone does
+    # not produce a working propagator in this Spring Boot version, and why TracingConfig
+    # declares the Propagation.Factory bean directly instead.
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      # Zipkin lives in the `obs` Compose profile. With the default `core` profile this
+      # endpoint is unreachable and the reporter logs a warning — harmless, since trace
+      # context is still created and still stored on each outbox row. Set
+      # COMPOSE_PROFILES=core,obs to view traces (needed for SC-015).
+      endpoint: http://localhost:9411/api/v2/spans
+
+logging:
+  level:
+    com.marketplace.inventory: INFO
