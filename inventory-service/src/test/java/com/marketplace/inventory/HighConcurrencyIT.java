@@ -1,6 +1,5 @@
 package com.marketplace.inventory;
 
-import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -41,21 +40,16 @@ import org.springframework.test.context.DynamicPropertySource;
  *
  * <p>The pool size chosen — 60 — is a deliberate middle point: large enough that a thousand-way burst
  * drains without spurious connection-acquisition failures standing in for the actual result, and small
- * enough that, added to whatever other cached test contexts (each at the default of 5) might still be
- * alive in the same JVM, the total stays well under a fresh Testcontainers PostgreSQL instance's own
- * default connection ceiling — a real ceiling checked directly against this image
- * ({@code postgres:16-alpine}'s own default {@code max_connections}, 100), not assumed.
+ * enough that, added to whatever other cached test contexts might still be alive in the same JVM, the
+ * total stays well under a fresh Testcontainers PostgreSQL instance's own default connection ceiling —
+ * a real ceiling checked directly against this image ({@code postgres:16-alpine}'s own default
+ * {@code max_connections}, 100), not assumed.
  *
- * <p>{@code @DirtiesContext(classMode = AFTER_CLASS)} closes this 60-connection pool and evicts this
- * context from Spring's test cache the moment each concrete subclass's own tests finish, rather than
- * leaving it open indefinitely alongside whatever other cached contexts accumulate later in the same
- * JVM run. Found necessary directly, not assumed: without it, a later test with its own uniquely
- * cached context ({@code LapsedRebookingIT}, whose {@code @TestPropertySource} makes it ineligible to
- * reuse any existing cached context) failed outright with PostgreSQL's own
- * {@code FATAL: sorry, too many clients already} — several contexts' pools, each individually
- * reasonable, were simply all alive and holding connections at once.
+ * <p>{@code @DirtiesContext(classMode = AFTER_CLASS)} is inherited from {@link InventoryIT} itself
+ * rather than redeclared here — see that class's own Javadoc for why the first version of this fix,
+ * scoped only to this one base class, still was not enough once the whole suite ran together rather
+ * than one class at a time in isolation.
  */
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class HighConcurrencyIT extends InventoryIT {
 
 	static {

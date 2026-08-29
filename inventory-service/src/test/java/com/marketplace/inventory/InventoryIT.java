@@ -1,6 +1,7 @@
 package com.marketplace.inventory;
 
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -36,8 +37,25 @@ import org.testcontainers.utility.DockerImageName;
  * Starting Kafka for tests that never touch it would also add several seconds to every run for a
  * component none of them exercise. Tests that genuinely need a broker extend {@link InventoryKafkaIT}
  * instead.
+ *
+ * <p>{@code @DirtiesContext(classMode = AFTER_CLASS)} closes and evicts this Spring context from the
+ * test cache the moment each concrete test CLASS finishes, rather than letting it accumulate
+ * alongside every other cached context Failsafe builds across a full run. Found necessary directly,
+ * not assumed: a run of the WHOLE suite together — as opposed to the individual classes verified in
+ * isolation while writing them — hit PostgreSQL's own {@code FATAL: sorry, too many clients already}
+ * repeatedly, even after {@link HighConcurrencyIT} alone had already been given this same annotation.
+ * Several test classes each carry their own uniquely-cached context (any distinct
+ * {@code @TestPropertySource}, or Kafka's own bootstrap-servers property in
+ * {@link InventoryKafkaIT}'s subclasses), and Failsafe's default sequential execution never actually
+ * needs more than one of them alive at a time — so closing eagerly, on every class rather than only
+ * the heaviest ones, is what removes the whole category of "how many contexts happen to still be
+ * cached right now" bugs rather than chasing it one exception at a time. The cost is a fresh context
+ * build for every test class instead of reuse across classes that happen to share identical
+ * configuration; at this suite's current size that cost is a few extra seconds, not a few extra
+ * minutes, and is accepted for the reliability it buys.
  */
 @SpringBootTest
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class InventoryIT {
 
 	/**
