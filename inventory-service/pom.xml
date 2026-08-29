@@ -1,112 +1,277 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
+
+	<!--
+	  WHY the parent is ticket-marketplace and not spring-boot-starter-parent:
+	  the generated project inherited Boot directly, which pins its own Boot version and
+	  ignores this project's. Inheriting the aggregator instead means the Boot version,
+	  the Java version, and the Surefire/Failsafe test wiring are all decided in exactly
+	  one place — the root pom — and every service module gets the same answer.
+
+	  Initializr produced Boot 4.0.8, because 3.3.x is no longer offered at all. This
+	  project is on 3.3.13, chosen because Spring Cloud 2023.0.x (Eureka and Gateway,
+	  build step 7) is a verified pairing with Boot 3.3 and no such pairing is verified
+	  for 4.x. Swapping the parent alone was not enough: Boot 4 RENAMED most starters, so
+	  every dependency below had to be rewritten to its 3.3 name. These are the same
+	  rewrites order-service/pom.xml documents — deliberately so, since generating at the
+	  same 4.0.8 it was generated at means the corrections are a known set rather than a
+	  new one. See the notes on each.
+	-->
 	<parent>
-		<groupId>org.springframework.boot</groupId>
-		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>4.0.8.RELEASE</version>
-		<relativePath/> <!-- lookup parent from repository -->
+		<groupId>com.marketplace</groupId>
+		<artifactId>ticket-marketplace</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
 	</parent>
-	<groupId>com.marketplace</groupId>
+
 	<artifactId>inventory-service</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
 	<name>inventory-service</name>
-	<description>Owns seat availability: arbitrates contention and records durable reservations</description>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
-	<properties>
-		<java.version>21</java.version>
-	</properties>
+	<description>Owns seat availability: arbitrates contention in Redis and records durable reservations in PostgreSQL</description>
+
+	<!--
+	  No <properties> block: java.version and project.build.sourceEncoding are inherited
+	  from the root. Repeating them here is how two modules quietly end up on different
+	  Java versions.
+
+	  The generated <url/>, <licenses/>, <developers/> and <scm/> blocks were removed
+	  rather than filled in. Initializr emits them empty for a project that might be
+	  published to a repository; this one is a module in a private multi-module build and
+	  is published nowhere.
+	-->
+
 	<dependencies>
+		<!--
+		  THE CONTRACT MODULE. This is the first service that CONSUMES messages rather
+		  than only publishing them, so depending on it buys something new: OrderCreated
+		  is deserialized into a record whose accessors are showId() and messageId(),
+		  which are separate fields of the same type. The seat key must be built from the
+		  first and never the second (R3). Reading a field by name off a Map would make
+		  that mistake invisible; reading it off this record makes it a compile error.
+		-->
+		<dependency>
+			<groupId>com.marketplace</groupId>
+			<artifactId>common-events</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+
+		<!--
+		  Boot 4 calls this spring-boot-starter-webmvc. On 3.3 it is -web.
+
+		  This service exposes no API of its own — availability is the read model's job in
+		  step 6. Web is here because Actuator serves /actuator/health and
+		  /actuator/prometheus over HTTP, and needs a servlet container to do it.
+		-->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-actuator</artifactId>
+			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
+
+		<!--
+		  NEW IN THIS MODULE, and the reason this service exists. Redis arbitrates which
+		  order wins a contended seat, because it executes a Lua script to completion
+		  before serving any other command — the one property that makes "check every seat
+		  is free, then take every seat" correct rather than a race (R1).
+
+		  The starter carries Lettuce, the client Spring Data Redis uses by default.
+
+		  This dependency's name is unchanged between Boot 3.3 and 4, unlike most of its
+		  neighbours below.
+		-->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-redis</artifactId>
 		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-flyway</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-kafka</artifactId>
-		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
+
+		<!-- Serves /actuator/health and /actuator/prometheus (FR-043). -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-webmvc</artifactId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<!--
+		  Boot 4 offers spring-boot-starter-kafka. On 3.3 there is no such starter — the
+		  dependency is Spring Kafka itself, whose version the root parent still manages.
+
+		  This module uses the consumer half for the first time in the project:
+		  @KafkaListener, the DefaultErrorHandler, and DeadLetterPublishingRecoverer all
+		  come from here (R9).
+		-->
+		<dependency>
+			<groupId>org.springframework.kafka</groupId>
+			<artifactId>spring-kafka</artifactId>
+		</dependency>
+
+		<!--
+		  Boot 4 offers spring-boot-starter-flyway. On 3.3 you declare flyway-core.
+		  flyway-database-postgresql is NOT optional despite looking like it: Flyway 10
+		  moved every database into its own module, and without this one Flyway starts
+		  and then fails at runtime with "Unsupported Database: PostgreSQL 16".
+
+		  The generated pom already carried flyway-database-postgresql but got flyway-core
+		  transitively through the starter, so removing the starter means declaring the
+		  core artifact explicitly.
+		-->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>
 		</dependency>
 
+		<!-- runtime scope: the driver is loaded by name, never referenced in our code. -->
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+
+		<!--
+		  TRACING. Two halves that are easy to confuse:
+		    micrometer-tracing-bridge-brave  CREATES spans and propagates W3C traceparent
+		    zipkin-reporter-brave            SHIPS finished spans to Zipkin
+
+		  SC-015 asks for ONE connected trace spanning order-service accepting the booking,
+		  its relay publishing, this service deciding, and this service's own relay
+		  publishing. That only holds if the traceparent order-service stored on its outbox
+		  row survives the trip through Kafka and is adopted here — so the bridge is
+		  load-bearing for this module in a way it was not for a service that only
+		  published.
+		-->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-bridge-brave</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.zipkin.reporter2</groupId>
+			<artifactId>zipkin-reporter-brave</artifactId>
+		</dependency>
+
+		<!--
+		  Declared explicitly rather than left as a transitive dependency, because
+		  TracingConfig imports its classes directly. It is already on the classpath either
+		  way, pulled in by micrometer-tracing-bridge-brave; Spring Boot's own
+		  autoconfiguration just never assembles it into a working Propagator bean in this
+		  version. No version is managed for this artifact by Spring Boot's BOM, so it is
+		  pinned here to the exact version already resolving transitively — the same value
+		  order-service pins.
+		-->
+		<dependency>
+			<groupId>io.zipkin.contrib.brave-propagation-w3c</groupId>
+			<artifactId>brave-propagation-tracecontext</artifactId>
+			<version>0.2.0</version>
+		</dependency>
+
+		<!-- Turns the actuator's metrics into the Prometheus scrape format (FR-045). -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
+
+		<!--
+		  Cuts the getters off the entities. Deliberately NOT @Data, @EqualsAndHashCode or
+		  @ToString on a JPA entity: the generated equals/hashCode fold in the identifier, so
+		  an entity's hash code CHANGES after persist and silently corrupts any hash-based
+		  collection already holding it, and the generated toString walks lazy associations,
+		  producing surprise queries or LazyInitializationException. @Getter and @Setter carry
+		  none of that risk.
+
+		  `optional` stops Lombok leaking onto the classpath of anything that depends on this
+		  module. It is a compile-time code generator; nothing needs it at runtime.
+		-->
+		<dependency>
+			<groupId>org.projectlombok</groupId>
+			<artifactId>lombok</artifactId>
+			<optional>true</optional>
+		</dependency>
+
+		<!--
+		  Boot 4 splits testing into per-slice starters — the generated pom carried seven
+		  of them (spring-boot-starter-webmvc-test, -data-jpa-test, -data-redis-test,
+		  -kafka-test, -flyway-test, -validation-test, -actuator-test). On 3.3 there is one
+		  starter carrying JUnit 5, AssertJ, Mockito and the Spring test context, and all
+		  seven collapse into it.
+		-->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-actuator-test</artifactId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+		  WHY real containers rather than embedded fakes: everything this service must be
+		  trusted about is behaviour the real products provide and the fakes do not. Redis
+		  in particular — script atomicity IS the property under test (FR-039), and an
+		  in-memory Redis stand-in written in Java would answer questions about the
+		  stand-in's own locking, not about the thing that runs in production. The partial
+		  unique index of SC-017 is likewise a real PostgreSQL feature with no H2 equivalent.
+		-->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>postgresql</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-jpa-test</artifactId>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>kafka</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+		  There is no official Testcontainers module for Redis, so the Redis container in
+		  InventoryIT is a plain GenericContainer running the `redis:7-alpine` image — the
+		  same image infra/docker-compose.yml runs. GenericContainer lives in
+		  testcontainers-core, which arrives transitively with the two modules above.
+
+		  Declared explicitly anyway, on the same principle as brave-propagation-tracecontext
+		  above: the test code imports GenericContainer by name, and a dependency you import
+		  from should be one you asked for, not one that happened to come along.
+		-->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-redis-test</artifactId>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
+
+		<!--
+		  Both the relay and the sweeper are scheduled, so their effects arrive after the
+		  call that triggered them returns — and a Redis hold lapses on a timer nothing
+		  signals. Awaitility polls for a condition with a timeout; the alternative is
+		  Thread.sleep, which is either too short and flaky or too long and slow.
+		-->
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-flyway-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-kafka-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-validation-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<groupId>org.awaitility</groupId>
+			<artifactId>awaitility</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
 
 	<build>
 		<plugins>
+			<!--
+			  Declared HERE and deliberately not at the root. This plugin repackages the
+			  jar into an executable fat jar with a nested classloader — correct for a
+			  service, wrong for common-events, which other modules depend on. Each
+			  service module opts in for itself.
+			-->
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
