@@ -75,9 +75,16 @@
 	  else. Steps 2 onward append order-service, inventory-service, payment-service,
 	  projection-service, api-gateway, auth-service, and eureka-server.
 	-->
+	<!--
+	  WHY the order here does not matter: Maven reads all of them, works out that
+	  order-service and inventory-service both depend on common-events, and builds it
+	  first regardless of where it appears in this list. The list is a set of members,
+	  not a sequence. It is kept in build-step order anyway, so it reads as a history.
+	-->
 	<modules>
 		<module>common-events</module>
 		<module>order-service</module>
+		<module>inventory-service</module>
 	</modules>
 
 	<!--
