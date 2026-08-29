@@ -66,7 +66,7 @@ Multi-module Maven project, build root at the repository root. This step adds on
 ### Domain
 
 - [X] T123 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/domain/ReservationStatus.java` — enum `HELD`, `EXPIRED`, `COMMITTED`, `RELEASED`, with a comment recording that only the first two are reachable in this step and why all four are declared now
-- [ ] T124 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/outbox/OutboxStatus.java` — enum `PENDING`, `PUBLISHED`, `PARKED`, ported from `order-service`
+- [X] T124 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/outbox/OutboxStatus.java` — enum `PENDING`, `PUBLISHED`, `PARKED`, ported from `order-service`
 - [ ] T125 [P] Create `Show.java`, `ShowSeat.java`, `ShowSeatId.java` and `SeatingPlanRepository.java` in `inventory-service/src/main/java/com/marketplace/inventory/domain/` — the seating plan, with a method answering "do all these labels exist in this show" in one query rather than N (FR-033)
 - [ ] T126 Create `inventory-service/src/main/java/com/marketplace/inventory/domain/Reservation.java` — JPA entity with `@Version`, `lock_expires_at`, and `@PrePersist`/`@PreUpdate` timestamps (FR-010, FR-012)
 - [ ] T127 Create `inventory-service/src/main/java/com/marketplace/inventory/domain/ReservationSeat.java` — entity over `reservation_seats` carrying `show_id` and `released_at`. WHY comment explaining that `released_at IS NULL` answers "is this seat claimed", which is true for both `HELD` and `COMMITTED`, so it is a projection of the parent's status rather than a duplicate of it (FR-020, R5)
