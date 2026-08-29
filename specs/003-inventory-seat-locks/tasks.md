@@ -85,7 +85,7 @@ Multi-module Maven project, build root at the repository root. This step adds on
 - [X] T134 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/config/JacksonConfig.java` — ported: `JavaTimeModule`, `WRITE_DATES_AS_TIMESTAMPS` off, `WRITE_BIGDECIMAL_AS_PLAIN` on, `FAIL_ON_UNKNOWN_PROPERTIES` off
 - [X] T135 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/config/RedisConfig.java` — a `StringRedisTemplate` and the command timeout. WHY comment: the Redis call is on the buyer's critical path, so an unbounded client timeout would violate the constitution's no-unbounded-blocking rule
 - [X] T136 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/config/KafkaProducerConfig.java` — ported: `acks=all`, idempotent, `StringSerializer` for key and value
-- [ ] T137 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/config/TracingConfig.java` — ported, keeping the javadoc explaining why the `Propagation.Factory` bean is declared directly rather than via `management.tracing.propagation.type`
+- [X] T137 [P] Create `inventory-service/src/main/java/com/marketplace/inventory/config/TracingConfig.java` — ported, keeping the javadoc explaining why the `Propagation.Factory` bean is declared directly rather than via `management.tracing.propagation.type`
 
 ### Test foundations
 
