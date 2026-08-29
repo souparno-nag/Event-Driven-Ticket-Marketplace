@@ -19,10 +19,15 @@ import com.marketplace.inventory.service.ReservationService;
  * are granted a partial hold — every granted request holds every seat it asked for, and every refused
  * request holds none.
  *
- * <p>Written and failing to compile until {@code ReservationService} and {@code ReservationOutcome}
- * exist (T158, T160). See {@link ReservationContentionIT} for the full reasoning behind calling
- * {@code ReservationService} directly and provisioning an independent seat pool (research.md R10,
- * FR-041) — that reasoning applies identically here and is not repeated.
+ * <p>{@code ReservationService} (T160) exists and this file compiles and passes today, even though
+ * the two Lua scripts it relies on are still empty stubs (T152) awaiting the developer exercise
+ * (T156): with {@code lock_seats.lua} returning nothing at all for every request, nothing is EVER
+ * granted, which trivially satisfies "zero partial holds" — a partial hold requires some success in
+ * the first place, and there is none to observe yet. This is a genuine pass of what this test actually
+ * asserts, not a false one; once T156 lands and real holds are actually granted, this test starts
+ * proving something it could not before. See {@link ReservationContentionIT} for the full reasoning
+ * behind calling {@code ReservationService} directly and provisioning an independent seat pool
+ * (research.md R10, FR-041) — that reasoning applies identically here and is not repeated.
  *
  * <p>WHY this test matters as something SC-001 alone cannot prove: SC-001's ten seats are contended by
  * every single request, so a hold that is granted there is trivially all-or-nothing simply because
@@ -32,7 +37,7 @@ import com.marketplace.inventory.service.ReservationService;
  * and set seats one at a time rather than as a single atomic pass (the exact trap
  * {@code contracts/seat-lock-scripts.md} names).
  */
-class ReservationPartialOverlapIT extends InventoryIT {
+class ReservationPartialOverlapIT extends HighConcurrencyIT {
 
 	private static final int SEAT_COUNT = 100;
 	private static final int REQUEST_COUNT = 500;

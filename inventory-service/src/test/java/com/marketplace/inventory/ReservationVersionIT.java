@@ -2,7 +2,6 @@ package com.marketplace.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -11,20 +10,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.marketplace.events.RejectionReason;
-import com.marketplace.inventory.domain.Reservation;
-import com.marketplace.inventory.domain.ReservationSeat;
 import com.marketplace.inventory.service.ReservationOutcome;
 import com.marketplace.inventory.service.ReservationService;
-
-import jakarta.persistence.EntityManager;
 
 /**
  * SC-011: two concurrent attempts to advance one reservation result in exactly one succeeding and the
  * other being detected, retried once, and then either succeeding or failing visibly — with zero cases
  * of one silently overwriting the other.
- *
- * <p>Written and failing to compile until {@code ReservationService} and {@code ReservationOutcome}
- * exist (T158, T160).
  *
  * <p>WHY this scenario — two new orders racing over one already-lapsed seat — rather than a synthetic
  * update to an arbitrary field: it is the ONLY concurrent write to an existing {@code Reservation} row
@@ -39,13 +31,10 @@ import jakarta.persistence.EntityManager;
  * "or failing visibly" branch, not its "second failure surfaces as a processing failure" branch, which
  * describes a rarer three-way race this two-thread test does not attempt to engineer.
  */
-class ReservationVersionIT extends InventoryIT {
+class ReservationVersionIT extends HighConcurrencyIT {
 
 	@Autowired
 	ReservationService reservationService;
-
-	@Autowired
-	EntityManager entityManager;
 
 	@Autowired
 	JdbcTemplate jdbcTemplate;
@@ -59,16 +48,14 @@ class ReservationVersionIT extends InventoryIT {
 		String seat = show.seatLabels().get(0);
 
 		// A reservation whose hold already lapsed, covering the one seat both racing orders want --
-		// planted directly rather than waiting a real 120 seconds for a hold to actually expire.
+		// planted directly and already COMMITTED, rather than waiting a real 120 seconds for a hold
+		// to actually expire. Committed matters here specifically: the racing threads below open
+		// their own, separate database connections, and must be able to see this row the instant
+		// they start -- see LapsedReservationFixture's own Javadoc for why entityManager.persist(...)
+		// inside this test method could not provide that.
 		UUID staleOrderId = UUID.randomUUID();
-		Reservation stale = new Reservation(
-				UUID.randomUUID(), staleOrderId, show.showId(), Instant.now().minusSeconds(1));
-		entityManager.persist(stale);
-		entityManager.persist(new ReservationSeat(stale.getReservationId(), seat, show.showId()));
-		entityManager.flush();
-		entityManager.clear();
+		UUID staleReservationId = LapsedReservationFixture.plant(jdbcTemplate, show.showId(), seat, staleOrderId);
 
-		UUID staleReservationId = stale.getReservationId();
 		Long versionBeforeRace = jdbcTemplate.queryForObject(
 				"SELECT version FROM reservations WHERE reservation_id = ?", Long.class, staleReservationId);
 

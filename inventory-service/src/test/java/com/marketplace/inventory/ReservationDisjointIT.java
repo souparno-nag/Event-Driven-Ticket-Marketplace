@@ -17,8 +17,13 @@ import com.marketplace.inventory.service.ReservationService;
  * this test provisions for itself, 100% are granted — demonstrating that no contention is invented by
  * the holding mechanism itself.
  *
- * <p>Written and failing to compile until {@code ReservationService} and {@code ReservationOutcome}
- * exist (T158, T160). See {@link ReservationContentionIT} for the shared reasoning behind calling
+ * <p>{@code ReservationService} (T160) exists and this file compiles, but the two Lua scripts it
+ * relies on are still empty stubs (T152) awaiting the developer exercise (T156) — an empty
+ * {@code lock_seats.lua} returns nothing at all for every request, which {@code SeatLockStore} reads
+ * as "not acquired" regardless of whether the seat was ever actually contended for, so every one of
+ * these five hundred structurally-disjoint requests is currently refused rather than granted. That is
+ * the intended state this test is written to catch the MOMENT it stops being true, not something this
+ * file works around. See {@link ReservationContentionIT} for the shared reasoning behind calling
  * {@code ReservationService} directly and provisioning an independent pool (research.md R10, FR-041).
  *
  * <p>WHY this test matters as much as {@link ReservationContentionIT}, despite asserting the opposite
@@ -30,7 +35,7 @@ import com.marketplace.inventory.service.ReservationService;
  * queuing rather than granting all five hundred. This test is what catches "correct because nothing
  * ever double-books" from "correct because it also never lets two things happen at once."
  */
-class ReservationDisjointIT extends InventoryIT {
+class ReservationDisjointIT extends HighConcurrencyIT {
 
 	private static final int REQUEST_COUNT = 500;
 

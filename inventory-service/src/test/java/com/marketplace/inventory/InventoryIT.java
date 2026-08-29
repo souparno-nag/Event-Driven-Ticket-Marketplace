@@ -109,17 +109,34 @@ public abstract class InventoryIT {
 	}
 
 	/**
-	 * Shrinks the pool every test context opens, from the production value of 12 down to 5 — the same
-	 * number order-service's own {@code PostgresIT} shrinks to, and for the same underlying reason:
-	 * several distinct Spring test contexts can be cached and alive at once across this service's
-	 * growing test suite, each eagerly opening its full pool on startup since HikariCP's default
-	 * minimum-idle equals its maximum-pool-size. Overriding it here, once, on the one class every test
-	 * context already shares, keeps every combination of contexts this suite can form comfortably under
-	 * PostgreSQL's connection limit without touching production's own pool size — which is itself a
-	 * deliberate admission-control choice (R12) this override must not disturb.
+	 * Read lazily by {@link #shrinkPoolForTests}, rather than a literal {@code "5"} in that method's
+	 * own body, specifically so {@link HighConcurrencyIT} can override it. Verified directly, not
+	 * assumed: a subclass's own {@code @DynamicPropertySource} method registering the identical
+	 * property key does NOT win over this class's registration — Spring collects every
+	 * {@code @DynamicPropertySource} method up the whole hierarchy and a later registration for the
+	 * same key does not evict an earlier one, the same behaviour order-service's own
+	 * {@code PostgresIT} documents hitting for the identical reason. A mutable static field this
+	 * class's own supplier reads at evaluation time, rather than at registration time, sidesteps that
+	 * entirely: whichever value the field holds by the time Spring actually calls the supplier is the
+	 * value used, regardless of which class in the hierarchy physically registered it. A subclass's
+	 * static initialiser — which the JVM runs before Spring ever builds the context — is what sets it.
+	 */
+	protected static int poolSize = 5;
+
+	/**
+	 * Shrinks the pool every test context opens, from the production value of 12 down to
+	 * {@link #poolSize} — 5 by default, the same number order-service's own {@code PostgresIT}
+	 * shrinks to, and for the same underlying reason: several distinct Spring test contexts can be
+	 * cached and alive at once across this service's growing test suite, each eagerly opening its
+	 * full pool on startup since HikariCP's default minimum-idle equals its maximum-pool-size.
+	 * Overriding it here, once, on the one class every test context already shares, keeps every
+	 * combination of contexts this suite can form comfortably under PostgreSQL's connection limit
+	 * without touching production's own pool size — which is itself a deliberate admission-control
+	 * choice (R12) this override must not disturb. {@link HighConcurrencyIT} raises the field's value
+	 * for the handful of tests that genuinely need more than 5 connections at once.
 	 */
 	@DynamicPropertySource
 	static void shrinkPoolForTests(DynamicPropertyRegistry registry) {
-		registry.add("spring.datasource.hikari.maximum-pool-size", () -> "5");
+		registry.add("spring.datasource.hikari.maximum-pool-size", () -> String.valueOf(poolSize));
 	}
 }

@@ -21,9 +21,11 @@ import com.marketplace.inventory.service.ReservationService;
  * granted, exactly 990 refused, and no seat ever appears in more than one granted hold — repeatable
  * across at least 20 consecutive runs with no run deviating.
  *
- * <p>Written and failing to compile until {@code ReservationService} and {@code ReservationOutcome}
- * exist (T158, T160) — the developer exercise this build step actually asks for is the two Lua scripts
- * underneath this class, not this test itself (research.md R11).
+ * <p>{@code ReservationService} (T160) exists and this file compiles, but the two Lua scripts it
+ * relies on are still empty stubs (T152) awaiting the developer exercise (T156) — until then, every
+ * booking attempt is refused, since an empty script returns nothing at all rather than the {@code 1}
+ * a genuinely free seat should produce. That is the intended state this test is written to catch the
+ * MOMENT it stops being true, not something this file works around.
  *
  * <p>Calls {@code ReservationService} DIRECTLY rather than through Kafka, per research.md R10 and
  * FR-040: {@code order.created} has three partitions, frozen in step 1, which caps genuinely
@@ -34,7 +36,7 @@ import com.marketplace.inventory.service.ReservationService;
  * Hall" (FR-041) — that seeded show is reserved for the step-9 k6 load test specifically, and a test
  * sharing it here would make that later test's own results depend on whether this one has already run.
  */
-class ReservationContentionIT extends InventoryIT {
+class ReservationContentionIT extends HighConcurrencyIT {
 
 	private static final int SEAT_COUNT = 10;
 	private static final int REQUEST_COUNT = 1_000;
@@ -104,10 +106,11 @@ class ReservationContentionIT extends InventoryIT {
 		CountDownLatch go = new CountDownLatch(1);
 		CountDownLatch done = new CountDownLatch(count);
 		List<T> results = java.util.Collections.synchronizedList(new ArrayList<>(count));
+		List<Thread> threads = new ArrayList<>(count);
 
 		for (int i = 0; i < count; i++) {
 			int index = i;
-			Thread.ofVirtual().start(() -> {
+			threads.add(Thread.ofVirtual().start(() -> {
 				ready.countDown();
 				try {
 					go.await();
@@ -117,12 +120,29 @@ class ReservationContentionIT extends InventoryIT {
 				} finally {
 					done.countDown();
 				}
-			});
+			}));
 		}
 
 		ready.await();
 		go.countDown();
 		boolean finished = done.await(60, TimeUnit.SECONDS);
+
+		// WHY stragglers are interrupted rather than merely reported: a thread still blocked past the
+		// deadline -- most plausibly still waiting on a JDBC connection -- does not stop existing just
+		// because this method is about to return a failed assertion. Left alone, it keeps running in
+		// the background and keeps holding whatever resource it was waiting on, competing with every
+		// later test's own connections and threads for as long as it takes to eventually finish or
+		// time out on its own. This was found, not assumed: an earlier version without this cleanup
+		// left enough stragglers behind that SEPARATE test classes sharing this same pool started
+		// failing with connection-acquisition errors that had nothing to do with their own logic.
+		if (!finished) {
+			for (Thread thread : threads) {
+				if (thread.isAlive()) {
+					thread.interrupt();
+				}
+			}
+		}
+
 		assertThat(finished).as("all %d requests to finish within 60s", count).isTrue();
 		return results;
 	}

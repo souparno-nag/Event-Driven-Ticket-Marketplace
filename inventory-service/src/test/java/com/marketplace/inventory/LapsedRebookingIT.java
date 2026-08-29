@@ -2,7 +2,6 @@ package com.marketplace.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -11,20 +10,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 
-import com.marketplace.inventory.domain.Reservation;
-import com.marketplace.inventory.domain.ReservationSeat;
 import com.marketplace.inventory.service.ReservationOutcome;
 import com.marketplace.inventory.service.ReservationService;
-
-import jakarta.persistence.EntityManager;
 
 /**
  * SC-016: a seat whose hold has lapsed is successfully rebooked by a different order on the first
  * attempt, with zero bookings failing because the previous reservation had not yet been retired —
  * measured with the periodic sweeper disabled.
- *
- * <p>Written and failing to compile until {@code ReservationService} and {@code ReservationOutcome}
- * exist (T158, T160).
  *
  * <p>{@code inventory.sweeper.enabled=false} is set for this whole test class on purpose, not merely
  * copied from habit: correctness here must not depend on a background sweeper ever having run
@@ -41,9 +33,6 @@ class LapsedRebookingIT extends InventoryIT {
 	ReservationService reservationService;
 
 	@Autowired
-	EntityManager entityManager;
-
-	@Autowired
 	JdbcTemplate jdbcTemplate;
 
 	@Test
@@ -52,12 +41,7 @@ class LapsedRebookingIT extends InventoryIT {
 		String seat = show.seatLabels().get(0);
 
 		UUID lapsedOrderId = UUID.randomUUID();
-		Reservation lapsed = new Reservation(
-				UUID.randomUUID(), lapsedOrderId, show.showId(), Instant.now().minusSeconds(1));
-		entityManager.persist(lapsed);
-		entityManager.persist(new ReservationSeat(lapsed.getReservationId(), seat, show.showId()));
-		entityManager.flush();
-		entityManager.clear();
+		UUID lapsedReservationId = LapsedReservationFixture.plant(jdbcTemplate, show.showId(), seat, lapsedOrderId);
 
 		UUID newOrderId = UUID.randomUUID();
 		ReservationOutcome outcome = reservationService.decide(newOrderId, show.showId(), List.of(seat));
@@ -65,7 +49,7 @@ class LapsedRebookingIT extends InventoryIT {
 		assertThat(outcome).isInstanceOf(ReservationOutcome.Reserved.class);
 
 		String lapsedStatus = jdbcTemplate.queryForObject(
-				"SELECT status FROM reservations WHERE reservation_id = ?", String.class, lapsed.getReservationId());
+				"SELECT status FROM reservations WHERE reservation_id = ?", String.class, lapsedReservationId);
 		assertThat(lapsedStatus).isEqualTo("EXPIRED");
 
 		Integer newOrderLiveClaims = jdbcTemplate.queryForObject("""
