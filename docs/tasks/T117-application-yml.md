@@ -30,9 +30,12 @@ Same URL as `order-service`. Same database, same container, same credentials. Wh
 comes next:
 
 ```yaml
+datasource:
+  url: jdbc:postgresql://localhost:5432/marketplace?currentSchema=inventory
 jpa:
-  hibernate:
-    default-schema: inventory
+  properties:
+    hibernate:
+      default_schema: inventory
 flyway:
   schemas: inventory
   default-schema: inventory
@@ -47,11 +50,36 @@ and whichever starts second finds a migration history that is not its own and fa
 A PostgreSQL **schema** is a namespace inside one database — think of it as a folder. Giving
 `inventory-service` the `inventory` schema means it gets its own tables, its own migration history,
 and its own answer to "what does the schema look like right now", all without touching
-`order-service`'s tables, without a second database, and without any change to `infra/`. Both
-`spring.jpa.hibernate.default-schema` and the two Flyway properties have to be set for the same
-reason from two different angles: Flyway needs to know where to create and track its own migrations,
-and Hibernate needs to know where to look for the tables Flyway created, when it validates the
-entities against them.
+`order-service`'s tables, without a second database, and without any change to `infra/`. Three
+settings have to point at that schema, from three different angles, and they are not
+interchangeable: Flyway needs to know where to create and track its own migrations; Hibernate needs
+to know where to look when it validates entities against the tables Flyway created; and the JDBC
+connection itself needs a `search_path` that resolves an unqualified table name to that schema at
+all, for any SQL that isn't Hibernate-generated.
+
+> **Correction, made while writing T126–T129.** This section originally showed
+> `spring.jpa.hibernate.default-schema: inventory` — a sibling of `ddl-auto` under `jpa.hibernate`.
+> That key does not exist: Spring Boot's `HibernateProperties` binds exactly two fields, `ddlAuto`
+> and `naming`, and silently drops anything else placed under that prefix — no warning, no error.
+> Hibernate then validated every entity against PostgreSQL's default `public` schema, where none of
+> this service's tables live, and reported all of them as missing. The mistake surfaced only once
+> real entities existed to boot against the real schema (a temporary smoke test written for T126–T129,
+> not by reading this file), because an empty module has nothing for a wrong schema setting to break.
+> The property that actually reaches Hibernate is a *native* Hibernate property, passed through
+> `spring.jpa.properties.*` rather than through Spring Boot's own typed `hibernate.*` binding —
+> `spring.jpa.properties.hibernate.default_schema`, with an underscore, matching Hibernate's own
+> `hibernate.default_schema`.
+>
+> Fixing that alone was not enough. `spring.jpa.properties.hibernate.default_schema` only
+> schema-qualifies the SQL **Hibernate itself generates** — from JPQL, Criteria, and derived query
+> methods. A *native* `@Query` (this service ends up with one, in `ReservationRepository`) is handed
+> to the JDBC driver exactly as written, and PostgreSQL resolves any unqualified table name in it
+> against the **connection's** `search_path`, which nothing above had touched — it stayed at
+> Postgres's default of `public`. The fix is `?currentSchema=inventory` on the JDBC URL itself, a
+> PgJDBC connection parameter that sets `search_path` once, for every connection in the pool,
+> covering native SQL and Hibernate-generated SQL alike. Both corrections were verified by rerunning
+> a real boot against the real schema after each one — the first got the context loading again, and
+> only the second got a native query actually returning rows.
 
 Everything else in this block — the 250ms connection timeout, the `statement_timeout` — is identical
 reasoning to `order-service`'s, copied rather than reinvented, because it is the same problem: a

@@ -9,7 +9,18 @@ spring:
     name: inventory-service
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/marketplace
+    # currentSchema sets this session's search_path at connection establishment — a PgJDBC
+    # parameter, not a Spring or Hibernate one. WHY it has to be set HERE rather than trusted
+    # to spring.jpa.properties.hibernate.default_schema alone: that property only schema-qualifies
+    # the SQL Hibernate itself generates from JPQL and Criteria queries. A native @Query (this
+    # service has one — ReservationRepository's lapsed-seat lookup) is handed to the JDBC driver
+    # exactly as written, with no schema qualification added by Hibernate at all, and is resolved
+    # against whatever search_path the CONNECTION carries. Without this, an unqualified table name
+    # in a native query resolves against `public` — where none of this service's tables live — and
+    # fails with "relation does not exist" despite Hibernate's own schema validation passing.
+    # Verified directly: a native query against `reservations` failed exactly this way with only
+    # the Hibernate-side property set, and started working once this was added.
+    url: jdbc:postgresql://localhost:5432/marketplace?currentSchema=inventory
     username: marketplace
     password: marketplace
 
@@ -38,19 +49,31 @@ spring:
       # entities and fails loudly if they do not. `validate` is what turns a forgotten or
       # mis-ordered migration into a startup failure instead of a mystery at runtime.
       ddl-auto: validate
-      # WHY this service needs a schema name Hibernate must be told explicitly, and
-      # order-service did not: order-service is the only tenant of the `marketplace`
-      # database's default (public) schema. inventory-service shares the same database
-      # instance but must not share its flyway_schema_history table with order-service's —
-      # two services racing to record migration history in one table is exactly the kind of
-      # bug that only appears the day both start at once. A dedicated schema gives this
-      # service its own history table and its own namespace with no compose change, no
-      # second database, and no new credentials (R12).
-      default-schema: inventory
     properties:
       hibernate:
         # Log SQL readably when debugging. Off by default via the logging level below.
         format_sql: true
+
+        # WHY this service needs a schema name Hibernate must be told explicitly, and
+        # order-service did not: order-service is the only tenant of the `marketplace`
+        # database's default (public) schema. inventory-service shares the same database
+        # instance but must not share its flyway_schema_history table with order-service's —
+        # two services racing to record migration history in one table is exactly the kind of
+        # bug that only appears the day both start at once. A dedicated schema gives this
+        # service its own history table and its own namespace with no compose change, no
+        # second database, and no new credentials (R12).
+        #
+        # CORRECTION: this was first written as spring.jpa.hibernate.default-schema (a
+        # sibling of ddl-auto, above). That key is silently ignored — Spring Boot's
+        # HibernateProperties binds exactly two fields, ddlAuto and naming, and anything
+        # else placed there is dropped without a warning or an error. Hibernate then
+        # validated every entity against the `public` schema, where none of this
+        # service's tables live, and reported them as entirely missing — discovered only
+        # once real entities existed to validate (T126–T129) and were actually booted
+        # against the real schema, not by reading this file. The property that actually
+        # reaches Hibernate is a native Hibernate property passed through
+        # spring.jpa.properties.*, which is exactly this block.
+        default_schema: inventory
 
   flyway:
     enabled: true
