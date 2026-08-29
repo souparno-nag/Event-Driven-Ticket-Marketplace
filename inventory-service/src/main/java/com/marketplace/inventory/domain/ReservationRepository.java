@@ -41,6 +41,16 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
 	List<Reservation> findByStatusAndLockExpiresAtAfter(ReservationStatus status, Instant asOf);
 
 	/**
+	 * Every reservation that is {@code HELD} but HAS already lapsed, as of {@code asOf} — the
+	 * opposite direction of {@link #findByStatusAndLockExpiresAtAfter}, and what
+	 * {@code LapsedReservationSweeper} (T161) retires. Deliberately NOT scoped to any particular show
+	 * or seat set, unlike {@link #findLapsedReservationsCoveringSeats}: the sweeper's job is tidying
+	 * up whatever nobody has contended for again, service-wide, not reacting to one booking's own
+	 * request.
+	 */
+	List<Reservation> findByStatusAndLockExpiresAtBefore(ReservationStatus status, Instant asOf);
+
+	/**
 	 * The reservations that currently hold any of {@code seatLabels} in {@code showId}, but whose
 	 * hold has already lapsed as of {@code asOf} — the reservations a new booking contending for
 	 * those same seats must retire inline, in the very same transaction as its own insert (FR-018).
