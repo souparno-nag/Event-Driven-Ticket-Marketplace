@@ -71,7 +71,7 @@ Multi-module Maven project, build root at the repository root. This step adds on
 - [X] T126 Create `inventory-service/src/main/java/com/marketplace/inventory/domain/Reservation.java` — JPA entity with `@Version`, `lock_expires_at`, and `@PrePersist`/`@PreUpdate` timestamps (FR-010, FR-012)
 - [X] T127 Create `inventory-service/src/main/java/com/marketplace/inventory/domain/ReservationSeat.java` — entity over `reservation_seats` carrying `show_id` and `released_at`. WHY comment explaining that `released_at IS NULL` answers "is this seat claimed", which is true for both `HELD` and `COMMITTED`, so it is a projection of the parent's status rather than a duplicate of it (FR-020, R5)
 - [X] T128 Create `inventory-service/src/main/java/com/marketplace/inventory/domain/ReservationRepository.java` — lookups by order id, the "live reservations covering these seats" query the inline retirement needs (FR-018), and the "held and unlapsed" query the startup rebuild needs (FR-015)
-- [ ] T129 [P] Create `ProcessedMessage.java`, `ProcessedMessageId.java` (`@Embeddable`) and `ProcessedMessageRepository.java` in `inventory-service/src/main/java/com/marketplace/inventory/consume/`
+- [X] T129 [P] Create `ProcessedMessage.java`, `ProcessedMessageId.java` (`@Embeddable`) and `ProcessedMessageRepository.java` in `inventory-service/src/main/java/com/marketplace/inventory/consume/`
 
 ### Ported outbox
 
