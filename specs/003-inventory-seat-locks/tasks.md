@@ -154,7 +154,7 @@ with no seat state changed.
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T164 [P] [US2] Create `inventory-service/src/test/java/com/marketplace/inventory/ReservationRejectionIT.java` — SC-008: one deliberately constructed request per cause, asserting each cause is produced by its own condition and by no other; that a refusal reports the **full** requested seat set rather than only the unavailable seats; and that after every refusal no seat from the request is held, including seats that were free at the moment of the attempt (FR-023)
+- [X] T164 [P] [US2] Create `inventory-service/src/test/java/com/marketplace/inventory/ReservationRejectionIT.java` — SC-008: one deliberately constructed request per cause, asserting each cause is produced by its own condition and by no other; that a refusal reports the **full** requested seat set rather than only the unavailable seats; and that after every refusal no seat from the request is held, including seats that were free at the moment of the attempt (FR-023)
 
 ### Implementation for User Story 2
 
