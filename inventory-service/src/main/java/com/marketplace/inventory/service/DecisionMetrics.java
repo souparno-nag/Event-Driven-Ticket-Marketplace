@@ -11,10 +11,18 @@ import io.micrometer.core.instrument.Timer;
 import com.marketplace.events.RejectionReason;
 
 /**
- * The three meters {@code ReservationService.decide(...)} contributes toward research.md R13's list
- * of five — the other two, {@code inventory.outbox.oldest.pending.age} and
- * {@code inventory.messages.deadlettered}, belong to the outbox relay (already built, T130-T133) and
- * the consumer's dead-letter path (User Story 3) respectively, neither of which this class touches.
+ * The four meters {@code ReservationService.decide(...)} and this service's dead-letter path
+ * contribute toward research.md R13's list of five — the last, {@code
+ * inventory.outbox.oldest.pending.age}, belongs to the outbox relay (already built, T130-T133), which
+ * this class does not touch.
+ *
+ * <p>{@code inventory.messages.deadlettered} is incremented from {@code KafkaConsumerConfig} (T177),
+ * not from anywhere in this class's own decision-making code — a message reaches the dead-letter
+ * channel specifically BECAUSE {@code ReservationService.decide(...)} was never reached at all
+ * (an unrecognised {@code schemaVersion}) or never finished (an exhausted retry schedule), so no
+ * decision-side method exists to call this one from. It lives on this class anyway, alongside the
+ * other four meters research.md R13 names together, rather than on a class of its own for one single
+ * counter.
  *
  * <p>WHY {@code inventory.holds.refused} is ONE counter tagged by {@code cause} rather than three
  * separate counters (one per {@link RejectionReason}): a fixed, closed set of causes is exactly what a
@@ -41,6 +49,7 @@ public class DecisionMetrics {
 
 	private final Counter holdsGranted;
 	private final Timer decisionDuration;
+	private final Counter messagesDeadlettered;
 	private final MeterRegistry meterRegistry;
 
 	public DecisionMetrics(MeterRegistry meterRegistry) {
@@ -52,6 +61,10 @@ public class DecisionMetrics {
 
 		this.decisionDuration = Timer.builder("inventory.decision.duration")
 				.description("Time to decide a booking request, granted or refused, from request to recorded outcome")
+				.register(meterRegistry);
+
+		this.messagesDeadlettered = Counter.builder("inventory.messages.deadlettered")
+				.description("order.created messages that could not be decided and were routed to the dead-letter channel")
 				.register(meterRegistry);
 	}
 
@@ -70,5 +83,16 @@ public class DecisionMetrics {
 
 	public void recordDecisionDuration(Duration duration) {
 		decisionDuration.record(duration);
+	}
+
+	/**
+	 * Otherwise a service that never manages to decide anything — every message failing before
+	 * {@code ReservationService.decide(...)} is ever reached, or exhausting its retries once inside
+	 * it — is indistinguishable from a service simply receiving no traffic at all: both show as
+	 * {@code inventory.holds.granted} and {@code inventory.holds.refused} staying at zero (FR-050,
+	 * research.md R13).
+	 */
+	public void recordDeadLettered() {
+		messagesDeadlettered.increment();
 	}
 }

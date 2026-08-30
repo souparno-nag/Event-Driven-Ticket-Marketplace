@@ -18,6 +18,7 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
@@ -29,6 +30,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.marketplace.events.OrderCreated;
 import com.marketplace.events.Topics;
 import com.marketplace.inventory.consume.UnknownSchemaVersionException;
+import com.marketplace.inventory.service.DecisionMetrics;
 
 /**
  * Everything that decides what happens to an {@code order.created} message this service cannot
@@ -149,16 +151,29 @@ public class KafkaConsumerConfig {
 	 * {@link ExponentialBackOff#setMaxAttempts(int)}'s own semantics — {@code inventory.consumer.max-
 	 * attempts: 4} means one original delivery plus three redeliveries, not four redeliveries on top
 	 * of the first.
+	 *
+	 * <p>{@code deadLetterPublishingRecoverer} is wrapped rather than handed to
+	 * {@link DefaultErrorHandler} directly, purely to increment {@code inventory.messages.deadlettered}
+	 * (T180, {@code DecisionMetrics}) at the one point in this service that actually knows a message
+	 * has reached its bounded end — every other candidate location (the listener, the service) would
+	 * only know a delivery failed THIS time, never whether the container's own retry schedule is about
+	 * to redeliver it again or has genuinely given up.
 	 */
 	@Bean
 	public DefaultErrorHandler kafkaErrorHandler(
 			DeadLetterPublishingRecoverer deadLetterPublishingRecoverer,
+			DecisionMetrics decisionMetrics,
 			@Value("${inventory.consumer.max-attempts:4}") int maxAttempts,
 			@Value("${inventory.consumer.backoff-ms:500}") long initialBackoffMs) {
 		ExponentialBackOff backOff = new ExponentialBackOff(initialBackoffMs, 2.0);
 		backOff.setMaxAttempts(maxAttempts);
 
-		DefaultErrorHandler errorHandler = new DefaultErrorHandler(deadLetterPublishingRecoverer, backOff);
+		ConsumerRecordRecoverer countingRecoverer = (record, exception) -> {
+			decisionMetrics.recordDeadLettered();
+			deadLetterPublishingRecoverer.accept(record, exception);
+		};
+
+		DefaultErrorHandler errorHandler = new DefaultErrorHandler(countingRecoverer, backOff);
 
 		// A schema version this service does not understand will never be understood no matter how
 		// many times it is redelivered -- retrying it only delays the dead-letter outcome that is
