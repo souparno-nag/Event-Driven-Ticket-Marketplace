@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
-import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -17,6 +16,8 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.utility.DockerImageName;
 
 import com.marketplace.inventory.InventoryIT;
 import com.marketplace.inventory.InventoryServiceApplication;
@@ -50,6 +51,25 @@ import com.marketplace.inventory.SeatingPlanFixture;
  * read.
  */
 class SeatLockRebuildIT extends InventoryIT {
+
+	/**
+	 * A Kafka broker of this test's own, used by nothing else. {@code InventoryIT} deliberately
+	 * carries no Kafka container at all (see its own Javadoc), so the SECOND, manually-built
+	 * application this test starts — which restores {@code auto-startup} and genuinely starts its
+	 * {@code @KafkaListener} — would otherwise have nothing to point at but {@code application.yml}'s
+	 * own real-environment default, {@code localhost:9092}. Bringing up a disposable broker here,
+	 * exactly the way {@code UndecidableRequestIT} brings up its own private infrastructure for a
+	 * parallel reason, is what keeps this test from ever touching a Kafka broker outside its own
+	 * control. Left for Testcontainers' own Ryuk companion to remove on JVM exit, matching
+	 * {@code InventoryIT}'s own stated reasoning for every other container in this service's suite:
+	 * hand-written cleanup reliably fails to run on a crash, and Ryuk does not.
+	 */
+	private static final KafkaContainer KAFKA =
+			new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.7.1"));
+
+	static {
+		KAFKA.start();
+	}
 
 	@Autowired
 	JdbcTemplate jdbcTemplate;
@@ -96,16 +116,28 @@ class SeatLockRebuildIT extends InventoryIT {
 
 		// The "restart": a second, independent application context, pointed at the SAME PostgreSQL
 		// and Redis this test's own inherited context already uses.
-		Properties properties = new Properties();
-		properties.setProperty("spring.datasource.url", jdbcUrlWithSchemaForRebuild());
-		properties.setProperty("spring.datasource.username", POSTGRES.getUsername());
-		properties.setProperty("spring.datasource.password", POSTGRES.getPassword());
-		properties.setProperty("spring.data.redis.host", REDIS.getHost());
-		properties.setProperty("spring.data.redis.port", String.valueOf(REDIS.getMappedPort(6379)));
+		//
+		// Passed as COMMAND-LINE-shaped arguments to run(...), not via SpringApplicationBuilder's own
+		// properties(Properties) method. Found necessary directly, not assumed: properties(...) adds
+		// them as Spring Boot's own "default properties" source, which sits at the LOWEST precedence
+		// in the property resolution order -- application.yml's own committed, real-environment values
+		// (localhost:5432, localhost:6379, localhost:9092) still won, silently. The first run of this
+		// test genuinely connected its "restarted" application to whatever real PostgreSQL, Redis, and
+		// Kafka happen to be running on their default local ports, not to this test's own Testcontainers
+		// instances -- confirmed by the log line showing the consumer joining a group against
+		// localhost:9092. Command-line arguments sit at the HIGHEST precedence, above application.yml,
+		// which is what actually makes this override take effect.
+		String[] restartArgs = {
+				"--spring.datasource.url=" + jdbcUrlWithSchemaForRebuild(),
+				"--spring.datasource.username=" + POSTGRES.getUsername(),
+				"--spring.datasource.password=" + POSTGRES.getPassword(),
+				"--spring.data.redis.host=" + REDIS.getHost(),
+				"--spring.data.redis.port=" + REDIS.getMappedPort(6379),
+				"--spring.kafka.bootstrap-servers=" + KAFKA.getBootstrapServers(),
+		};
 
 		try (ConfigurableApplicationContext restarted = new SpringApplicationBuilder(InventoryServiceApplication.class)
-				.properties(properties)
-				.run()) {
+				.run(restartArgs)) {
 
 			// The instant startup finishes is the instant SC-013 makes its claim about: the hold must
 			// already be observable in Redis, with less than a full 120-second lifetime left on it --
