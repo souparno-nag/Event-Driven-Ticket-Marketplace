@@ -183,7 +183,7 @@ reservation and the set of announcements are each identical to what a single del
 
 ### Implementation for User Story 3
 
-- [ ] T172 [US3] Create `inventory-service/src/main/java/com/marketplace/inventory/consume/IdempotencyGuard.java` — the class, its collaborators and the method signature, with the body left as `// TODO(developer)` carrying a comment stating the contract: insert-in-the-same-transaction, catch `DataIntegrityViolationException`, and why the guard must run before the hold attempt (CLAUDE.md requirement 3, FR-028, FR-032)
+- [X] T172 [US3] Create `inventory-service/src/main/java/com/marketplace/inventory/consume/IdempotencyGuard.java` — the class, its collaborators and the method signature, with the body left as `// TODO(developer)` carrying a comment stating the contract: insert-in-the-same-transaction, catch `DataIntegrityViolationException`, and why the guard must run before the hold attempt (CLAUDE.md requirement 3, FR-028, FR-032)
 - [ ] T173 [US3] Write `docs/tasks/T174-idempotency-guard-guide.md` — a beginner-level guide: what at-least-once delivery means, why a consumer rather than a producer solves it, why the insert must share the state change's transaction, why catching the constraint violation is the check rather than a `SELECT` first, and the self-contention trap if the guard runs after the hold. Delivered **before** T174
 - [ ] T174 **[human]** [US3] Implement the body of `IdempotencyGuard`, working from the contract and the guide from T173. Done when `IdempotencyIT` passes
 - [ ] T175 [US3] Review the T174 implementation against the contract and the project's comment standards. Keep it if it passes and reads well; rewrite it only if it does not, explaining what was wrong and why
