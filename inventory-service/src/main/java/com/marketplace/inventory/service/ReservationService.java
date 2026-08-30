@@ -7,8 +7,10 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.marketplace.events.RejectionReason;
 import com.marketplace.inventory.domain.Reservation;
@@ -22,14 +24,16 @@ import com.marketplace.inventory.seats.SeatLockStore;
 
 /**
  * Decides a booking request and records everything that follows from that decision, in one
- * transaction.
+ * transaction — or, on a detected optimistic-lock collision, in one fresh transaction retried exactly
+ * once (see {@link #decide}'s own Javadoc for why that retry cannot simply reuse the transaction that
+ * just failed).
  *
- * <p>{@link #decide} is deliberately the ONLY place {@code reservations}, {@code reservation_seats},
- * and {@code outbox} are all written from this service — the same discipline order-service's own
- * {@code OrderAcceptanceService} applies to its own two tables. FR-025 requires the decided outcome
- * and the seat state it was decided against to be genuinely atomic; the only way to make that claim
- * reviewable, rather than merely hoped for, is to have exactly one method where every row involved is
- * written, inside one {@code @Transactional} boundary.
+ * <p>{@link #decideAndRecord} is deliberately the ONLY place {@code reservations},
+ * {@code reservation_seats}, and {@code outbox} are all written from this service — the same
+ * discipline order-service's own {@code OrderAcceptanceService} applies to its own two tables. FR-025
+ * requires the decided outcome and the seat state it was decided against to be genuinely atomic; the
+ * only way to make that claim reviewable, rather than merely hoped for, is to have exactly one method
+ * where every row involved is written, inside one transactional boundary.
  *
  * <p>THIS BUILD STEP'S SCOPE, stated plainly: this class now decides between all three outcomes User
  * Story 1 and User Story 2 together name — every seat granted, or refused as one of
@@ -51,6 +55,7 @@ public class ReservationService {
 	private final OutboxWriter outboxWriter;
 	private final OutboxRepository outboxRepository;
 	private final DecisionMetrics decisionMetrics;
+	private final TransactionTemplate transactionTemplate;
 	private final long ttlMillis;
 
 	public ReservationService(
@@ -61,6 +66,7 @@ public class ReservationService {
 			OutboxWriter outboxWriter,
 			OutboxRepository outboxRepository,
 			DecisionMetrics decisionMetrics,
+			PlatformTransactionManager transactionManager,
 			@Value("${inventory.hold.ttl-ms:120000}") long ttlMillis) {
 		this.reservationRepository = reservationRepository;
 		this.reservationSeatRepository = reservationSeatRepository;
@@ -69,6 +75,7 @@ public class ReservationService {
 		this.outboxWriter = outboxWriter;
 		this.outboxRepository = outboxRepository;
 		this.decisionMetrics = decisionMetrics;
+		this.transactionTemplate = new TransactionTemplate(transactionManager);
 		this.ttlMillis = ttlMillis;
 	}
 
@@ -108,13 +115,28 @@ public class ReservationService {
 	 * @param seatIds the seats requested, all-or-nothing
 	 * @return what was decided — never null, exactly one outcome per call (FR-022)
 	 */
-	@Transactional
 	public ReservationOutcome decide(UUID orderId, UUID showId, List<String> seatIds) {
 		Instant decidedAt = Instant.now();
 
-		ReservationOutcome outcome = decideOutcome(orderId, showId, seatIds, decidedAt);
-
-		outboxRepository.save(outboxWriter.write(orderId, seatIds, outcome, decidedAt));
+		ReservationOutcome outcome;
+		try {
+			outcome = transactionTemplate.execute(status -> decideAndRecord(orderId, showId, seatIds, decidedAt));
+		} catch (OptimisticLockingFailureException retryOnce) {
+			// Retry exactly once, per CLAUDE.md's own optimistic-concurrency requirement -- and in a
+			// BRAND NEW transaction, not the one that just failed. Found necessary directly, not
+			// assumed: this method used to be a single @Transactional method, and two orders racing to
+			// retire the same lapsed reservation (FR-018) would occasionally have the loser's flush
+			// throw ObjectOptimisticLockingFailureException with nothing anywhere catching it --
+			// ReservationVersionIT (T148) caught this the moment its own timing made the two threads'
+			// retirement attempts land close enough together to collide for real. Catching the
+			// exception INSIDE the same @Transactional method would not have been enough on its own:
+			// once Hibernate raises a StaleObjectStateException during a flush, the persistence context
+			// that experienced it is not safe to keep using for further work in that same transaction.
+			// TransactionTemplate.execute(...) is what gives the retry a genuinely fresh transaction and
+			// a genuinely fresh persistence context to load the now-current row into, rather than
+			// re-reading stale state through a session that has already seen this exact conflict once.
+			outcome = transactionTemplate.execute(status -> decideAndRecord(orderId, showId, seatIds, decidedAt));
+		}
 
 		if (outcome instanceof ReservationOutcome.Reserved) {
 			decisionMetrics.recordGranted();
@@ -123,6 +145,18 @@ public class ReservationService {
 		}
 		decisionMetrics.recordDecisionDuration(Duration.between(decidedAt, Instant.now()));
 
+		return outcome;
+	}
+
+	/**
+	 * Everything {@link #decide} does inside ONE transaction: decide the outcome, then record the
+	 * outbox row announcing it. Kept separate from {@link #decide} itself so the retry-once logic
+	 * there can run this exact unit of work a second time, in a second, independent transaction, on
+	 * genuinely fresh state -- not merely re-execute a method call that happens to look the same.
+	 */
+	private ReservationOutcome decideAndRecord(UUID orderId, UUID showId, List<String> seatIds, Instant decidedAt) {
+		ReservationOutcome outcome = decideOutcome(orderId, showId, seatIds, decidedAt);
+		outboxRepository.save(outboxWriter.write(orderId, seatIds, outcome, decidedAt));
 		return outcome;
 	}
 
