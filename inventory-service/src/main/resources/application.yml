@@ -176,6 +176,18 @@ management:
   endpoint:
     health:
       show-details: always
+  defaults:
+    metrics:
+      export:
+        # Already Spring Boot's own default in a real deployment -- stated explicitly anyway,
+        # since FR-045 makes scraping /actuator/prometheus a hard requirement rather than a
+        # convenience, and a correctness requirement belongs in code/config a reader can find,
+        # not in an implicit framework default nobody had to write down. Note for anyone adding
+        # a test that scrapes this endpoint: @SpringBootTest disables export by default, at a
+        # property precedence ABOVE both this file and @TestPropertySource -- confirmed directly
+        # while building MetricsExposureIT (T182), where both were tried and silently overridden.
+        # Only @DynamicPropertySource, evaluated last, actually re-enables it in a test.
+        enabled: true
   tracing:
     # See order-service/src/main/resources/application.yml for why this setting alone does
     # not produce a working propagator in this Spring Boot version, and why TracingConfig
