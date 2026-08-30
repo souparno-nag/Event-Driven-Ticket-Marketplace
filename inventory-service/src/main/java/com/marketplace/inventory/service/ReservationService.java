@@ -227,10 +227,16 @@ public class ReservationService {
 			return new ReservationOutcome.Rejected(RejectionReason.SHOW_NOT_FOUND);
 		}
 
-		// Compares counts, exactly as SeatingPlanRepository's own Javadoc describes: if they differ,
-		// at least one requested label does not exist. Requests never carry a duplicate seat label in
-		// practice (a buyer books each seat at most once), so this stays a plain size comparison rather
-		// than a set-difference -- the simpler check that is actually true of every real caller.
+		// TRADEOFF: compares counts, exactly as SeatingPlanRepository's own Javadoc describes, rather
+		// than a genuine set-difference between the requested and existing labels. A plain size
+		// comparison is wrong in one theoretical case a set-difference would catch correctly: a
+		// request naming the SAME existing label twice (["A1","A1"]) would pass this check (both
+		// requested labels "exist", from the database's point of view there is only one to find) even
+		// though the two-element request and the one-element result differ in a way a set-difference
+		// would flag as suspicious. Accepted because no real caller in this system ever constructs a
+		// request with a duplicate seat label -- a buyer books each seat at most once -- so the
+		// simpler check is correct for every request this service will actually receive, at the cost
+		// of being theoretically incomplete against a shape nothing sends.
 		Set<String> existingLabels = seatingPlanRepository.findExistingSeatLabels(showId, seatIds);
 		if (existingLabels.size() != seatIds.size()) {
 			return new ReservationOutcome.Rejected(RejectionReason.SEATS_NOT_FOUND);

@@ -203,7 +203,7 @@ reservation and the set of announcements are each identical to what a single del
 - [X] T182 [P] Verify `/actuator/prometheus` exposes all five meters from R13 under the expected names, and that the refusal counter carries a `cause` tag for each of the three causes (FR-045)
 - [X] T183 [P] Create `inventory-service/Dockerfile` — multi-stage build mirroring `order-service`'s, exposing 8082 and running the boot jar
 - [X] T184 [P] Update the repository `README.md` with the inventory-service section: what it owns, its port, the Redis key format, and how to watch a hold appear and lapse
-- [ ] T185 [P] Audit every non-obvious line in `inventory-service/` for a WHY comment rather than a WHAT comment, and confirm each design decision with a real alternative carries a `TRADEOFF:` comment naming what was rejected and why
+- [X] T185 [P] Audit every non-obvious line in `inventory-service/` for a WHY comment rather than a WHAT comment, and confirm each design decision with a real alternative carries a `TRADEOFF:` comment naming what was rejected and why
 - [ ] T186 Run quickstart scenario S8 under `COMPOSE_PROFILES=core,obs` and confirm **one** connected trace spans order-service's acceptance, its publish, this service's decision and its own publish — not four unrelated traces (SC-015)
 - [ ] T187 Walk quickstart scenarios S1 through S10 end to end on a clean `make down && make up`, confirming every success criterion in spec.md is either verified or explicitly recorded as deferred to a later step
 
