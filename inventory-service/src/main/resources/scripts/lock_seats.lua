@@ -39,3 +39,22 @@
   Return the number 1 or 0 — never a boolean. Lua's `false` becomes a Redis nil
   reply, and the Java side expects a Long.
 --]]
+
+-- Pass 1: check every key WITHOUT setting anything. A key is acquirable if it
+-- doesn't exist yet, or if it already holds this order's own id (guarantee 3).
+-- Bailing out here, before any SET has happened, is what keeps a refusal from
+-- ever leaving a partial hold behind.
+for i = 1, #KEYS do
+	local current = redis.call('GET', KEYS[i])
+	if current and current ~= ARGV[1] then
+		return 0
+	end
+end
+
+-- Pass 2: every key passed, so take them all. Only reachable once the loop
+-- above has confirmed the whole batch is free-or-own-order.
+for i = 1, #KEYS do
+	redis.call('SET', KEYS[i], ARGV[1], 'PX', ARGV[2])
+end
+
+return 1

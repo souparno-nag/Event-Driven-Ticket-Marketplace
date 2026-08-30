@@ -124,6 +124,20 @@ public class ReservationService {
 				seat.release(asOf);
 			}
 		}
+
+		// Found directly, not assumed: without this flush, ux_reservation_seat_live rejected a
+		// booking Redis had just legitimately granted, on a seat this very method had just retired.
+		// Hibernate's write-behind queue does not flush in the order statements were issued -- by
+		// default it groups ALL pending inserts ahead of ALL pending updates, regardless of which was
+		// dirtied first. recordReservation's new ReservationSeat is an insert; the release() call
+		// above is an update on an already-loaded row. Left to Hibernate's own ordering, the new
+		// seat's insert would reach PostgreSQL before this retirement's UPDATE clears released_at on
+		// the old row, so the partial unique index -- scoped to released_at IS NULL -- would still see
+		// two live claims on the same seat and refuse the second one. Flushing here forces the
+		// retirement to hit the database before recordReservation ever runs, so the two can never race
+		// against each other within this one transaction.
+		reservationSeatRepository.flush();
+		reservationRepository.flush();
 	}
 
 	private ReservationOutcome recordReservation(UUID orderId, UUID showId, List<String> seatIds, Instant decidedAt) {

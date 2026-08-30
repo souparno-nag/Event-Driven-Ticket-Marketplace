@@ -44,3 +44,17 @@
   DEL from the calling Java code, is the entire reason this is a script and
   not a plain command.
 --]]
+
+-- Delete a key only if it still holds THIS order's id. A key already gone
+-- (GET returns Lua's false) simply never equals ARGV[1], so it's skipped
+-- with no special-casing -- that's what makes release idempotent for free.
+local deleted = 0
+for i = 1, #KEYS do
+	local current = redis.call('GET', KEYS[i])
+	if current == ARGV[1] then
+		redis.call('DEL', KEYS[i])
+		deleted = deleted + 1
+	end
+end
+
+return deleted
