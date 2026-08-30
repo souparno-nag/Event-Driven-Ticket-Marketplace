@@ -1,7 +1,9 @@
 package com.marketplace.inventory.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +15,7 @@ import com.marketplace.inventory.domain.Reservation;
 import com.marketplace.inventory.domain.ReservationRepository;
 import com.marketplace.inventory.domain.ReservationSeat;
 import com.marketplace.inventory.domain.ReservationSeatRepository;
+import com.marketplace.inventory.domain.SeatingPlanRepository;
 import com.marketplace.inventory.outbox.OutboxRepository;
 import com.marketplace.inventory.outbox.OutboxWriter;
 import com.marketplace.inventory.seats.SeatLockStore;
@@ -28,38 +31,44 @@ import com.marketplace.inventory.seats.SeatLockStore;
  * reviewable, rather than merely hoped for, is to have exactly one method where every row involved is
  * written, inside one {@code @Transactional} boundary.
  *
- * <p>THIS BUILD STEP'S SCOPE, stated plainly: this class currently decides between exactly two
- * outcomes — every seat granted, or refused as {@link RejectionReason#SEATS_ALREADY_HELD}. The
- * seating-plan causes — {@code SHOW_NOT_FOUND}, {@code SEATS_NOT_FOUND} — arrive with User Story 2,
- * which extends this same method rather than introducing a second one (tasks.md's own note on why
- * these two stories are not fully independent: splitting one decision across two classes would
- * scatter one decision across two files for no benefit). The idempotency guard that must run before
- * this method is ever called in production arrives with User Story 3 — every test exercising this
- * class directly in User Story 1 calls it exactly once per order, so no redelivery-suppression is
- * needed here yet.
+ * <p>THIS BUILD STEP'S SCOPE, stated plainly: this class now decides between all three outcomes User
+ * Story 1 and User Story 2 together name — every seat granted, or refused as one of
+ * {@link RejectionReason#SHOW_NOT_FOUND}, {@link RejectionReason#SEATS_NOT_FOUND}, or
+ * {@link RejectionReason#SEATS_ALREADY_HELD} — via the same method rather than a second one
+ * (tasks.md's own note on why these two stories are not fully independent: splitting one decision
+ * across two classes would scatter one decision across two files for no benefit). The idempotency
+ * guard that must run before this method is ever called in production arrives with User Story 3 —
+ * every test exercising this class directly calls it exactly once per order, so no
+ * redelivery-suppression is needed here yet.
  */
 @Service
 public class ReservationService {
 
 	private final ReservationRepository reservationRepository;
 	private final ReservationSeatRepository reservationSeatRepository;
+	private final SeatingPlanRepository seatingPlanRepository;
 	private final SeatLockStore seatLockStore;
 	private final OutboxWriter outboxWriter;
 	private final OutboxRepository outboxRepository;
+	private final DecisionMetrics decisionMetrics;
 	private final long ttlMillis;
 
 	public ReservationService(
 			ReservationRepository reservationRepository,
 			ReservationSeatRepository reservationSeatRepository,
+			SeatingPlanRepository seatingPlanRepository,
 			SeatLockStore seatLockStore,
 			OutboxWriter outboxWriter,
 			OutboxRepository outboxRepository,
+			DecisionMetrics decisionMetrics,
 			@Value("${inventory.hold.ttl-ms:120000}") long ttlMillis) {
 		this.reservationRepository = reservationRepository;
 		this.reservationSeatRepository = reservationSeatRepository;
+		this.seatingPlanRepository = seatingPlanRepository;
 		this.seatLockStore = seatLockStore;
 		this.outboxWriter = outboxWriter;
 		this.outboxRepository = outboxRepository;
+		this.decisionMetrics = decisionMetrics;
 		this.ttlMillis = ttlMillis;
 	}
 
@@ -67,9 +76,16 @@ public class ReservationService {
 	 * Decides whether {@code seatIds} in {@code showId} can be held for {@code orderId}, and records
 	 * every consequence of that decision.
 	 *
-	 * <p>Ordering within this method is load-bearing, not incidental (contracts/inventory-consumer.md):
+	 * <p>Ordering within this method is load-bearing, not incidental (contracts/inventory-consumer.md,
+	 * FR-033):
 	 *
 	 * <ol>
+	 *   <li>Does the show exist at all? If not, refuse as {@link RejectionReason#SHOW_NOT_FOUND}
+	 *       before examining a single seat — the failure is one level up from the seating chart, and
+	 *       nothing about the requested seats has even been evaluated yet.
+	 *   <li>Do every one of the requested seat labels exist within that show's plan? If not, refuse as
+	 *       {@link RejectionReason#SEATS_NOT_FOUND} — deliberately a different cause from the one
+	 *       below, because this one never succeeds on retry and the other very well might.
 	 *   <li>Retire any lapsed reservation covering these exact seats, in THIS transaction (FR-018,
 	 *       research.md R6) — Redis frees a seat the instant its TTL lapses, but the old reservation
 	 *       is still {@code HELD} in PostgreSQL until this step says otherwise. Skipping it would let
@@ -77,11 +93,14 @@ public class ReservationService {
 	 *   <li>Attempt the atomic Redis hold. This is inside the transaction but not part of it —
 	 *       {@code SeatLockStore}'s own Javadoc explains why that direction of inconsistency is the
 	 *       accepted one.
-	 *   <li>Record the reservation and its seats ONLY if the hold succeeded — a refusal writes no
-	 *       reservation row at all (data-model.md).
+	 *   <li>Record the reservation and its seats ONLY if the hold succeeded — a refusal, for ANY of the
+	 *       three causes, writes no reservation row at all (data-model.md).
 	 *   <li>Record the outbox row announcing whichever outcome this was, in the same transaction as
 	 *       everything above, so the announcement can never be lost between commit and publish nor
-	 *       recomputed later against seat state that has moved on (FR-025).
+	 *       recomputed later against seat state that has moved on (FR-025). The outbox row always
+	 *       carries the FULL requested seat set, for every cause including a refusal — {@code
+	 *       OutboxWriter} never filters it down to just the seats that caused the trouble, which is
+	 *       what lets a caller always see exactly what it asked for (FR-023).
 	 * </ol>
 	 *
 	 * @param orderId the saga id this decision belongs to
@@ -93,17 +112,45 @@ public class ReservationService {
 	public ReservationOutcome decide(UUID orderId, UUID showId, List<String> seatIds) {
 		Instant decidedAt = Instant.now();
 
-		retireLapsedReservationsCovering(showId, seatIds, decidedAt);
-
-		ReservationOutcome outcome;
-		if (seatLockStore.tryLock(showId, seatIds, orderId)) {
-			outcome = recordReservation(orderId, showId, seatIds, decidedAt);
-		} else {
-			outcome = new ReservationOutcome.Rejected(RejectionReason.SEATS_ALREADY_HELD);
-		}
+		ReservationOutcome outcome = decideOutcome(orderId, showId, seatIds, decidedAt);
 
 		outboxRepository.save(outboxWriter.write(orderId, seatIds, outcome, decidedAt));
+
+		if (outcome instanceof ReservationOutcome.Reserved) {
+			decisionMetrics.recordGranted();
+		} else {
+			decisionMetrics.recordRefused(((ReservationOutcome.Rejected) outcome).reason());
+		}
+		decisionMetrics.recordDecisionDuration(Duration.between(decidedAt, Instant.now()));
+
 		return outcome;
+	}
+
+	/**
+	 * The three seating-plan-and-contention checks in the order FR-033 requires, stopping at the
+	 * first one that fails. Split out from {@link #decide} so that method's own Javadoc can describe
+	 * the six-step sequence as a whole without this method's internal early-returns interrupting it.
+	 */
+	private ReservationOutcome decideOutcome(UUID orderId, UUID showId, List<String> seatIds, Instant decidedAt) {
+		if (!seatingPlanRepository.existsById(showId)) {
+			return new ReservationOutcome.Rejected(RejectionReason.SHOW_NOT_FOUND);
+		}
+
+		// Compares counts, exactly as SeatingPlanRepository's own Javadoc describes: if they differ,
+		// at least one requested label does not exist. Requests never carry a duplicate seat label in
+		// practice (a buyer books each seat at most once), so this stays a plain size comparison rather
+		// than a set-difference -- the simpler check that is actually true of every real caller.
+		Set<String> existingLabels = seatingPlanRepository.findExistingSeatLabels(showId, seatIds);
+		if (existingLabels.size() != seatIds.size()) {
+			return new ReservationOutcome.Rejected(RejectionReason.SEATS_NOT_FOUND);
+		}
+
+		retireLapsedReservationsCovering(showId, seatIds, decidedAt);
+
+		if (seatLockStore.tryLock(showId, seatIds, orderId)) {
+			return recordReservation(orderId, showId, seatIds, decidedAt);
+		}
+		return new ReservationOutcome.Rejected(RejectionReason.SEATS_ALREADY_HELD);
 	}
 
 	/**

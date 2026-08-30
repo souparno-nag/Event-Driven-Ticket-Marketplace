@@ -158,7 +158,7 @@ with no seat state changed.
 
 ### Implementation for User Story 2
 
-- [ ] T165 [US2] Extend `ReservationService` with the seating-plan checks: an unknown show yields `SHOW_NOT_FOUND` before any seat is examined, and a real show with a label absent from its plan yields `SEATS_NOT_FOUND`. WHY comment recording why the two are distinct: one never succeeds on retry and the other might, and collapsing them has clients retrying forever against a seat that will never exist (FR-023, FR-033)
+- [X] T165 [US2] Extend `ReservationService` with the seating-plan checks: an unknown show yields `SHOW_NOT_FOUND` before any seat is examined, and a real show with a label absent from its plan yields `SEATS_NOT_FOUND`. WHY comment recording why the two are distinct: one never succeeds on retry and the other might, and collapsing them has clients retrying forever against a seat that will never exist (FR-023, FR-033)
 - [X] T166 [P] [US2] Create `inventory-service/src/main/java/com/marketplace/inventory/service/DecisionMetrics.java` — `inventory.holds.granted`, `inventory.holds.refused` tagged by cause, and `inventory.decision.duration`. WHY comment on the tag: without it a service refusing everything and a service refusing nothing produce identical graphs (FR-045, R13)
 - [ ] T167 [US2] Run quickstart scenarios S2 and S3 and record the results (SC-002, SC-008)
 
