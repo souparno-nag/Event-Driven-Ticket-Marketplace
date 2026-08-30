@@ -66,18 +66,24 @@ public abstract class InventoryIT {
 	 * is reused by everything afterwards; Testcontainers' own Ryuk companion container removes it when
 	 * this JVM exits, including on a crash, which is exactly the case hand-written cleanup reliably
 	 * fails to run for.
+	 *
+	 * <p>{@code protected} rather than package-private: {@code SeatLockRebuildIT} (T170) lives in the
+	 * {@code startup} subpackage and needs to read this same container's connection details to build a
+	 * second, independent Spring context pointed at it — package-private would hide it from a
+	 * subclass sitting in a different package, and inheritance is exactly the mechanism this field's
+	 * own visibility should honour.
 	 */
-	static final PostgreSQLContainer<?> POSTGRES =
+	protected static final PostgreSQLContainer<?> POSTGRES =
 			new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"));
 
 	/**
-	 * Same image, same lifecycle reasoning as {@link #POSTGRES}. The log-message wait is deliberately
-	 * more specific than the default "wait for the port to open": a Redis process can have its
-	 * listening socket bound a moment before it has actually finished loading and is ready to serve a
-	 * command, and this is the same distinction {@code infra/docker-compose.yml}'s own PING healthcheck
-	 * exists to make for the real environment.
+	 * Same image, same lifecycle reasoning as {@link #POSTGRES}, and {@code protected} for the
+	 * identical reason. The log-message wait is deliberately more specific than the default "wait for
+	 * the port to open": a Redis process can have its listening socket bound a moment before it has
+	 * actually finished loading and is ready to serve a command, and this is the same distinction
+	 * {@code infra/docker-compose.yml}'s own PING healthcheck exists to make for the real environment.
 	 */
-	static final GenericContainer<?> REDIS =
+	protected static final GenericContainer<?> REDIS =
 			new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
 					.withExposedPorts(6379)
 					.waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
