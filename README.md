@@ -5,12 +5,16 @@ each service reacting to messages and publishing its own. It exists to demonstra
 make distributed transactions work: the transactional outbox, idempotent consumers, compensating
 actions, and a CQRS read model.
 
-> ### Status: build step 2 of 11 — order acceptance and the transactional outbox
+> ### Status: build step 3 of 11 — seat holds and the inventory authority
 >
 > What exists today is the **shared message contract library**, the **multi-module build**, a
-> **one-command local environment**, and **`order-service`**: accept a booking, record it and the
-> first saga event durably in one transaction, and read it back. There is still no seat locking, no
-> payments, no compensation. Those arrive in build steps 3 through 5.
+> **one-command local environment**, **`order-service`**, and **`inventory-service`**: consume a
+> booking, hold its seats atomically in Redis, retire a lapsed hold inline, refuse a request that
+> cannot be honoured with a stated cause, and announce the outcome durably via its own transactional
+> outbox. One piece is deliberately unfinished on purpose: `IdempotencyGuard`'s own body is a
+> developer exercise (see [`docs/tasks/T174-idempotency-guard-guide.md`](docs/tasks/T174-idempotency-guard-guide.md))
+> — everything around it, including every test that will judge it, already works. There is still no
+> payment, no compensation. Those arrive in build steps 4 and 5.
 >
 > This is stated up front because a README describing the finished system would be describing
 > something you cannot run. The [roadmap](#roadmap) below says what is built and what is not.
@@ -81,6 +85,7 @@ Ports, per-component memory limits, and diagnostics are in [`infra/README.md`](i
 ```
 common-events/     Shared message contracts. Seven records, no framework dependencies.
 order-service/     Accepts bookings, owns the Order aggregate and its transactional outbox.
+inventory-service/ Holds seats atomically in Redis, backed durably by PostgreSQL.
 infra/             docker-compose.yml, Kafka channel provisioning, environment docs.
 docs/tasks/        A written explanation of every task, in order.
 specs/             The specification driving the build.
@@ -139,6 +144,40 @@ identifier that isn't a well-formed UUID gets a `400`; a well-formed one nothing
 
 Full HTTP contract: [`specs/002-order-service-outbox/contracts/orders-api.yaml`](specs/002-order-service-outbox/contracts/orders-api.yaml).
 
+### `inventory-service`
+
+The saga's second hop. Runs on **port 8082**. It owns the seating plan, every `Reservation`, and the
+one Redis key that decides — for a thousand simultaneous buyers wanting the same seat — which single
+one of them actually gets it. Redis answers *is this seat claimed right now*, fast enough to arbitrate
+real contention; PostgreSQL answers *what actually happened* and survives a restart. When the two
+disagree, PostgreSQL wins, and a startup rebuilder replays every still-live hold back into Redis before
+this service accepts a single booking request.
+
+A seat's lock lives at:
+
+```
+seat:{showId}:{seatId}  →  orderId   (TTL 120s)
+```
+
+Watch a hold appear and lapse directly against Redis, without needing a booking request in flight:
+
+```bash
+docker exec redis redis-cli --scan --pattern 'seat:*'      # every seat currently held, if any
+docker exec redis redis-cli GET  "seat:<showId>:<seatId>"  # the order id holding it
+docker exec redis redis-cli TTL  "seat:<showId>:<seatId>"  # seconds remaining — counts down from 120
+```
+
+Once that TTL reaches zero the key is simply gone: Redis stops answering for it on its own, with no
+event of any kind — the entry in [`inventory.reservations`](specs/003-inventory-seat-locks/data-model.md)
+is what still records the hold ever existed, and a later booking contending for that same seat is what
+actually retires it (`HELD` → `EXPIRED`) the moment anyone asks again.
+
+The all-or-nothing hold itself is one atomic Lua script, not a check-then-set from application code —
+see [`contracts/seat-lock-scripts.md`](specs/003-inventory-seat-locks/contracts/seat-lock-scripts.md)
+for why a `SETNX` loop cannot make the same guarantee. Consuming `order.created` and deciding a
+request's outcome is documented in
+[`contracts/inventory-consumer.md`](specs/003-inventory-seat-locks/contracts/inventory-consumer.md).
+
 ---
 
 ## Tests
@@ -153,8 +192,12 @@ asserts that every order's messages come back in the order they were sent — th
 own suite. `order-service`'s own `verify` starts PostgreSQL and Kafka containers of its own and
 covers the outbox end to end: acceptance is genuinely atomic, the relay only marks a row sent after a
 real broker acknowledgement, one poisoned row never stalls another order's, and concurrent relays
-never send the same row twice. Integration tests are **not** behind an opt-in flag: a test nobody
-runs by default is a test that rots.
+never send the same row twice. `inventory-service`'s own `verify` starts PostgreSQL, Redis, and
+Kafka, and drives a thousand simultaneous virtual threads at ten seats twenty times running — every
+run exactly ten granted, exactly nine hundred ninety refused, zero seats ever double-booked — plus a
+real store outage that produces no false refusal and self-heals with no manual step once the store
+recovers. Integration tests are **not** behind an opt-in flag: a test nobody runs by default is a test
+that rots.
 
 ---
 
@@ -168,7 +211,7 @@ write by hand, and the traps already identified in each.
 |---|---|---|
 | 1 | Contracts, build root, local environment | ✅ **done** |
 | 2 | `order-service` with a transactional outbox | ✅ **done** |
-| 3 | `inventory-service` — Redis seat locks via Lua | not started |
+| 3 | `inventory-service` — Redis seat locks via Lua | 🟡 **one exercise remaining** — `IdempotencyGuard`'s own body |
 | 4 | `payment-service` and saga completion | not started |
 | 5 | Compensation paths | not started |
 | 6 | `projection-service` and the Elasticsearch read model | not started |
