@@ -2,6 +2,7 @@ package com.marketplace.inventory;
 
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -53,9 +54,29 @@ import org.testcontainers.utility.DockerImageName;
  * build for every test class instead of reuse across classes that happen to share identical
  * configuration; at this suite's current size that cost is a few extra seconds, not a few extra
  * minutes, and is accepted for the reliability it buys.
+ *
+ * <p>WHY {@code inventory.rebuild.enabled=false} is set here via {@code @TestPropertySource} rather
+ * than the lazy-static-field technique {@link #poolSize} uses for its own override — found necessary
+ * directly, not designed in up front: every test in this service boots the full application context,
+ * {@code SeatLockRebuilder} included, and an always-enabled rebuilder was confirmed to start a real
+ * {@code @KafkaListener} against the real local broker for every test that never overrides
+ * {@code spring.kafka.bootstrap-servers}. A first attempt gated this with a mutable static field read
+ * lazily by a {@code @DynamicPropertySource} supplier, the same mechanism {@link #poolSize} uses — but
+ * that attempt was proven, by direct reproduction, NOT to work: JUnit's own test discovery loads every
+ * class named on a single Failsafe invocation (Kafka-needing or not) up front, before any of their
+ * tests actually run, which runs {@link InventoryKafkaIT}'s static initialiser — and with it, the line
+ * setting that shared field back to {@code true} — before this class's own context is ever built,
+ * regardless of which class Failsafe was asked to run first. {@code @TestPropertySource} has no such
+ * hazard: Spring resolves a subclass's own inlined property as strictly higher precedence than an
+ * ancestor's, at merged-context-configuration time, with no shared mutable state and no dependency on
+ * class-loading order at all — the same mechanism {@code LapsedRebookingIT} already uses for
+ * {@code inventory.sweeper.enabled}. {@link InventoryKafkaIT} declares its own
+ * {@code @TestPropertySource} setting this back to {@code true} for the handful of tests that
+ * genuinely need real consumption to happen at all.
  */
 @SpringBootTest
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@TestPropertySource(properties = "inventory.rebuild.enabled=false")
 public abstract class InventoryIT {
 
 	/**
@@ -126,8 +147,12 @@ public abstract class InventoryIT {
 	 * already carries a query string — verified directly, Testcontainers' PostgreSQL URL currently
 	 * includes {@code ?loggerLevel=OFF} by default, but hard-coding {@code &} against that assumption
 	 * would silently break the moment a Testcontainers upgrade changes it.
+	 *
+	 * <p>{@code protected} rather than {@code private}: {@link InventoryKafkaIT} needs this exact URL
+	 * for a plain JDBC connection of its own — see that class's own Javadoc on
+	 * {@code clearOutboxBacklog} for why.
 	 */
-	private static String jdbcUrlWithSchema() {
+	protected static String jdbcUrlWithSchema() {
 		String url = POSTGRES.getJdbcUrl();
 		return url + (url.contains("?") ? "&" : "?") + "currentSchema=inventory";
 	}

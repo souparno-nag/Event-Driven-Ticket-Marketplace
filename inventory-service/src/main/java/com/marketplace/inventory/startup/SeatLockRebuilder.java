@@ -3,6 +3,7 @@ package com.marketplace.inventory.startup;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.data.redis.connection.RedisStringCommands.SetOption;
@@ -46,6 +47,19 @@ import com.marketplace.inventory.seats.SeatKey;
  * the context finishes refreshing — including this runner's OWN moment to act, racing it rather than
  * waiting for it. Turning auto-start off is what carves out the gap this class fills; starting the
  * registry explicitly, at the end of this method, is what closes it again.
+ *
+ * <p>WHY {@code inventory.rebuild.enabled} exists at all — found necessary, not designed in up
+ * front, matching {@code LapsedReservationSweeper}'s own identical flag: every test in this service
+ * boots the FULL application context, this class included, regardless of whether that particular test
+ * has anything to do with Kafka. Left ungated, this class would start a real {@code @KafkaListener}
+ * against WHATEVER {@code spring.kafka.bootstrap-servers} happens to resolve to for that test's own
+ * context — the real, local, production-shaped broker for any test that never overrides it — and that
+ * consumer joining and leaving the same real consumer group, repeatedly, across dozens of unrelated
+ * test classes, was confirmed directly to be what was intermittently starving an entirely different,
+ * Kafka-using test's own consumer of the CPU it needed to get scheduled within its own timeout window.
+ * Defaulting to {@code true} keeps production and any test that genuinely needs real consumption
+ * (which sets this explicitly) working exactly as before; {@code InventoryIT} disables it for the
+ * large majority of tests that have no business touching Kafka at all.
  */
 @Component
 public class SeatLockRebuilder implements ApplicationRunner {
@@ -54,20 +68,27 @@ public class SeatLockRebuilder implements ApplicationRunner {
 	private final ReservationSeatRepository reservationSeatRepository;
 	private final StringRedisTemplate redisTemplate;
 	private final KafkaListenerEndpointRegistry listenerRegistry;
+	private final boolean enabled;
 
 	public SeatLockRebuilder(
 			ReservationRepository reservationRepository,
 			ReservationSeatRepository reservationSeatRepository,
 			StringRedisTemplate redisTemplate,
-			KafkaListenerEndpointRegistry listenerRegistry) {
+			KafkaListenerEndpointRegistry listenerRegistry,
+			@Value("${inventory.rebuild.enabled:true}") boolean enabled) {
 		this.reservationRepository = reservationRepository;
 		this.reservationSeatRepository = reservationSeatRepository;
 		this.redisTemplate = redisTemplate;
 		this.listenerRegistry = listenerRegistry;
+		this.enabled = enabled;
 	}
 
 	@Override
 	public void run(ApplicationArguments args) {
+		if (!enabled) {
+			return;
+		}
+
 		Instant now = Instant.now();
 
 		for (Reservation held : reservationRepository.findByStatusAndLockExpiresAtAfter(ReservationStatus.HELD, now)) {

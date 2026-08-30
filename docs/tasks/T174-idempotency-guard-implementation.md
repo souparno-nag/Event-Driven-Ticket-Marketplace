@@ -1,0 +1,110 @@
+# T174 — writing the body of `IdempotencyGuard`
+
+**What this did:** filled in `IdempotencyGuard.isFirstDelivery`, the one method in this whole build
+step responsible for making sure a message Kafka delivers more than once only ever has an effect
+once. Everything around it — the table, the entity, the class that calls it — already existed; this
+task was the six-line method body itself.
+
+---
+
+## The problem this one method solves
+
+Kafka promises "at least once" delivery, never "exactly once." In practice that means: any consumer
+of a Kafka topic must expect the same message to arrive two, three, or ten times — after a rebalance,
+after a consumer restart, after any doubt at all about whether the last delivery was acknowledged.
+Nothing about that is a bug in Kafka; it is the deliberate trade Kafka makes, because guaranteeing
+"exactly once" delivery is far more expensive and this service doesn't need it if it can make
+redelivery harmless on its own.
+
+"Harmless" is the whole job here. Without a guard, a redelivered `order.created` message would walk
+straight back through `ReservationService`, try to hold the same seats a second time, and either
+throw a database constraint violation or — worse — quietly create a second reservation for an order
+that already has one. The guard's job is to notice "I have already done this" and stop, before any
+of that has a chance to happen.
+
+## How the guard notices
+
+The table it writes to, `processed_messages`, has a **composite primary key**: `(message_id,
+consumer_name)`. A primary key is a promise the database itself enforces — no two rows may ever share
+one. So the guard's whole strategy is:
+
+1. Try to insert a row for this exact `(messageId, "inventory-service")` pair.
+2. If the insert succeeds, this is genuinely the first time this consumer has seen this message —
+   return `true`, and the caller goes on to actually do the work (hold the seats, write the outcome).
+3. If the insert fails because that row already exists, the database itself has just proven this
+   message was already handled — catch that specific failure and return `false`. The caller does
+   nothing further.
+
+This is deliberately an *attempt the insert and see* strategy, not a *check first, then insert*
+strategy. Checking first (`SELECT ... then INSERT if not found`) would leave a gap between the check
+and the insert — long enough for two redeliveries of the same message, arriving at almost the same
+moment, to both see "not found yet" and both proceed. Attempting the insert directly closes that gap
+completely: the database's own uniqueness check is atomic, so exactly one of two simultaneous attempts
+can ever win.
+
+```java
+public boolean isFirstDelivery(UUID messageId) {
+    try {
+        processedMessageRepository.saveAndFlush(new ProcessedMessage(messageId, CONSUMER_NAME));
+        return true;
+    } catch (DataIntegrityViolationException alreadyProcessed) {
+        return false;
+    }
+}
+```
+
+## Why `saveAndFlush`, not `save`
+
+This is the one detail in this method that isn't obvious from reading it, and it's worth explaining
+carefully because it's the kind of thing that looks like a style choice but is actually load-bearing.
+
+Hibernate (the library that turns Java method calls into SQL) doesn't necessarily send an `INSERT`
+statement to the database the instant you call `save()`. For efficiency, it often queues writes up and
+sends them all together later, when the surrounding transaction is about to commit — this is called
+"write-behind." For most entities that's a harmless optimization. But this method's *entire point* is
+to catch a specific database error (a duplicate key) at the moment it happens, so it can decide
+"already processed" versus everything else. If the actual `INSERT` doesn't run until much later — deep
+inside the transaction's own commit, after this method has already returned `true` and the caller has
+gone on to do other work — then the duplicate-key error surfaces in a completely different place, at a
+point where nothing is set up to catch it and interpret it correctly.
+
+`saveAndFlush` forces the pending write out to the database immediately, inside this method's own
+`try` block, which is the only place that can tell "this exact failure means already-processed" apart
+from every other possible database error.
+
+## A second bug this task's own verification uncovered
+
+While proving the guard correct under real, repeated redelivery (not just a single call), a second,
+unrelated problem surfaced: sometimes the failure wasn't a clean duplicate-key error at all — it was a
+`NOT NULL` constraint violation on the table's `processed_at` column, a column the entity's own
+`@PrePersist` callback (`onInsert`) always sets before any row is written.
+
+The cause turned out to be a well-known trap in Spring Data JPA: this entity's id (`ProcessedMessageId`)
+is hand-assigned in Java, in the constructor — never generated by the database. Spring Data's default
+rule for "is this a new row or an existing one?" is "does it have an id yet?" — and since this entity
+*always* has an id by the time `save()` sees it, Spring Data was concluding "not new" and quietly
+routing every single call through `EntityManager.merge()` instead of `EntityManager.persist()`.
+`merge()` behaves differently: it asks the database "does a row with this id already exist?" before
+deciding whether to insert or update, and under the right timing it built the eventual `INSERT` from a
+copy of the entity taken *before* the `@PrePersist` callback had run — landing `processed_at` as
+`NULL`.
+
+The fix was to make `ProcessedMessage` implement Spring Data's `Persistable<ProcessedMessageId>`
+interface and answer `true`, unconditionally, from its `isNew()` method. That tells Spring Data
+directly "treat this as new, always" — sidestepping the id-based guess entirely, and forcing the
+direct, single-`INSERT` path this guard's own design was always written to assume.
+
+## What this proves, and how
+
+`IdempotencyIT` exercises all three guarantees this method has to satisfy:
+
+- **`tenDeliveriesOneEffect`** — the identical message published ten separate times produces exactly
+  one reservation, one live seat hold, one recorded message id, and one outbox row. Only the guard
+  stands between "ten deliveries" and "ten reservations."
+- **`distinctMessagesAreIndependent`** — two genuinely different bookings, published together, are
+  each granted independently. This guards against a guard that's keyed on the wrong thing (the order
+  id, say, instead of the message id), which could make handling one silently suppress the other.
+- **`outcomeSurvivesInterruption`** — a message redelivered well after its first delivery already
+  succeeded and was announced produces no error and no second reservation.
+
+All three pass reliably, confirmed by running this class in isolation and as part of the full suite.

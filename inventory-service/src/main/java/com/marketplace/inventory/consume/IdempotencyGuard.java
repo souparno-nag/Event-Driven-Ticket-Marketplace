@@ -2,6 +2,7 @@ package com.marketplace.inventory.consume;
 
 import java.util.UUID;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 /**
@@ -64,18 +65,19 @@ public class IdempotencyGuard {
 	 *         must do nothing further
 	 */
 	public boolean isFirstDelivery(UUID messageId) {
-		// TODO(developer): see docs/tasks/T174-idempotency-guard-guide.md before writing this.
-		//
-		// Contract, restated in code terms: attempt processedMessageRepository.save(new
-		// ProcessedMessage(messageId, CONSUMER_NAME)) inside the CALLER's transaction (this method
-		// takes no @Transactional of its own — the transaction boundary belongs on the service
-		// method, per contracts/inventory-consumer.md's own note on why @Transactional belongs on
-		// the service, not the listener). Catch DataIntegrityViolationException specifically, not
-		// Exception generally, and return false from that catch block. Let every other exception
-		// propagate uncaught -- a database that is merely unreachable must look like exactly that,
-		// not like "message already processed".
-		throw new UnsupportedOperationException(
-				"IdempotencyGuard.isFirstDelivery is a developer exercise (T174) -- see "
-						+ "docs/tasks/T174-idempotency-guard-guide.md and contracts/inventory-consumer.md");
+		try {
+			// saveAndFlush, not save: ProcessedMessage's id is a hand-assigned @EmbeddedId, not a
+			// database-generated one, so Hibernate has no need to send the INSERT immediately and
+			// would otherwise happily defer it to the transaction's own later flush -- at which point
+			// a duplicate-key violation surfaces far from this method, wrapped around whatever ELSE
+			// the same transaction was doing, not as a clean, catchable exception here. Flushing
+			// explicitly is what forces the constraint check to happen NOW, inside this try block,
+			// which is the only place this method can tell "already handled" apart from every other
+			// possible failure.
+			processedMessageRepository.saveAndFlush(new ProcessedMessage(messageId, CONSUMER_NAME));
+			return true;
+		} catch (DataIntegrityViolationException alreadyProcessed) {
+			return false;
+		}
 	}
 }

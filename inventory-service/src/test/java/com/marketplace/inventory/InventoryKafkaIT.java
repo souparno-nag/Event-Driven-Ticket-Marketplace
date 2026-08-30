@@ -1,5 +1,9 @@
 package com.marketplace.inventory;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -13,6 +17,7 @@ import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.junit.jupiter.api.BeforeAll;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -20,6 +25,7 @@ import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -49,7 +55,14 @@ import com.marketplace.events.Topics;
  * happily deserialize whatever that same service just serialized, using the identical settings, which
  * proves the two agree with themselves — not that the message is genuinely readable by a party that
  * built its own understanding of the contract independently.
+ *
+ * <p>WHY {@code @TestPropertySource(properties = "inventory.rebuild.enabled=true")} here rather than
+ * setting a shared field in this class's static initialiser: see {@link InventoryIT}'s own Javadoc for
+ * the direct reproduction that ruled the field-based version out. A class-level inlined property has no
+ * such hazard — it is resolved against this class's own merged context configuration, not against
+ * whatever a differently-ordered static initialiser happened to leave behind.
  */
+@TestPropertySource(properties = "inventory.rebuild.enabled=true")
 public abstract class InventoryKafkaIT extends InventoryIT {
 
 	/** Matches production (T044's {@code create-topics.sh}) so ordering-sensitive tests exercise the
@@ -95,6 +108,64 @@ public abstract class InventoryKafkaIT extends InventoryIT {
 	@DynamicPropertySource
 	static void kafkaProperties(DynamicPropertyRegistry registry) {
 		registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+
+		// A fresh, random group id per concrete test CLASS (one static initialiser run, not one per
+		// test method — @DirtiesContext(AFTER_CLASS) already scopes a context, and this group id, to
+		// exactly that same lifetime) -- found necessary directly, not designed in up front, by
+		// reproducing a full-suite-only failure down to its root cause. This container and its
+		// "order.created" topic are shared by every InventoryKafkaIT-based test CLASS (the same
+		// singleton-container reasoning as InventoryIT's own POSTGRES/REDIS), but @DirtiesContext tears
+		// down each class's own listener container the moment that class's tests finish -- possibly
+		// mid-redelivery, for a message this class's own test intentionally sent more than once but had
+		// no further reason to wait for once its OWN assertions were satisfied. Spring Kafka's retry
+		// bookkeeping (which attempt number, how much backoff remains) lives only in that now-destroyed
+		// container's memory, never in Kafka itself, so a FIXED group id inherited by the NEXT class's
+		// own fresh consumer does not resume a retry in progress -- it re-delivers that leftover message
+		// as brand new, on whatever partition it happens to occupy, and that class's own single-threaded
+		// consumer cannot reach ANY later record on that same partition -- including that class's own,
+		// entirely unrelated message -- until the inherited backlog's own retry schedule runs to
+		// completion. Confirmed by direct reproduction: SagaEndToEndIT, run immediately after
+		// IdempotencyIT in the same JVM fork, timed out waiting for its own SeatsReserved twice in a
+		// row, at identical elapsed times both times -- not the random jitter genuine machine load would
+		// produce, but the deterministic cost of redelivering IdempotencyIT's own leftover duplicates
+		// from scratch. A unique group id per class means every class's own consumer starts with no
+		// committed offset and no inherited backlog to work through, regardless of what any earlier
+		// class left mid-retry.
+		registry.add("spring.kafka.consumer.group-id", () -> "inventory-service-test-" + UUID.randomUUID());
+	}
+
+	/**
+	 * Deletes every existing {@code outbox} row before this class's own tests run — found necessary
+	 * directly, not designed in up front, by reproducing {@code IdempotencyIT}'s own full-suite-only
+	 * failure down to its root cause. {@code POSTGRES} is a SINGLETON container shared by every test
+	 * class in this service ({@link InventoryIT}'s own Javadoc on that field), including
+	 * non-Kafka-aware ones like {@code ReservationContentionIT}, and {@code OutboxRelay} runs
+	 * unconditionally in every one of their contexts too, with no gate of its own. A heavy, high-volume
+	 * test writes an outbox row for every decision it makes; if that context closes before its own
+	 * relay has drained all of them (plausible for a test producing hundreds of rows in a few seconds
+	 * against {@code outbox.relay.batch-size: 100}), those rows are still sitting there, genuinely
+	 * {@code PENDING} with zero attempts, when THIS class's OWN context and relay start — and
+	 * {@code claimBatch}'s ordering claims the OLDEST rows first. Confirmed by direct reproduction:
+	 * {@code IdempotencyIT} run immediately after {@code ReservationContentionIT} claimed a full batch
+	 * of 100 rows on nearly every 500ms poll for the entire length of the run, never converging, while
+	 * its own test methods' {@code SeatsReserved} never arrived within their timeout — this class's own
+	 * rows were sitting at the BACK of someone else's queue the whole time, not failing to be decided
+	 * or failing to be relayed once reached. Deleting the backlog before this class's own tests run is
+	 * what guarantees its own relay only ever has its own rows to work through.
+	 *
+	 * <p>A plain JDBC connection, not {@code @Autowired JdbcTemplate}: {@code @BeforeAll} runs before
+	 * JUnit builds this class's Spring context, so no Spring-managed bean exists yet to inject.
+	 * {@link InventoryIT#POSTGRES} is already started (its own static initialiser runs before this
+	 * subclass's, by ordinary Java class-initialisation order), so a direct connection to it here
+	 * needs nothing from Spring at all.
+	 */
+	@BeforeAll
+	static void clearOutboxBacklog() throws SQLException {
+		try (Connection connection = DriverManager.getConnection(
+				jdbcUrlWithSchema(), POSTGRES.getUsername(), POSTGRES.getPassword());
+				Statement statement = connection.createStatement()) {
+			statement.execute("DELETE FROM outbox");
+		}
 	}
 
 	/**

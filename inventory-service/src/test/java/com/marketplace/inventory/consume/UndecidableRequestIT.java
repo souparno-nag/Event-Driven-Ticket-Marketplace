@@ -77,10 +77,12 @@ import com.marketplace.events.Topics;
  * a completely different guarantee (what happens to a message once consumption is ALREADY underway)
  * and overriding the gate here keeps the two concerns from being tangled into one test.
  *
- * <p>Expected to fail entirely until User Story 3's implementation tasks exist: with no
- * {@code OrderCreatedListener} (T178) anywhere in the application context yet, nothing consumes
- * {@code order.created} regardless of this override, so every {@code await} below currently times out
- * exactly as it does in every other test in this checkpoint's own state.
+ * <p>Passes now that {@code OrderCreatedListener} (T178) and {@code IdempotencyGuard} (T174) both
+ * exist. Every assertion below that checks a channel stays silent (or carries only what THIS test's
+ * own request produced) is filtered to this test's own message key before asserting — this topic is
+ * shared with sibling test methods in this same class, and an unfiltered emptiness check was found,
+ * directly rather than assumed, to fail on an unrelated sibling's own leftover message still sitting
+ * on the shared topic, not on anything this test's own request actually did wrong.
  */
 @SpringBootTest(classes = com.marketplace.inventory.InventoryServiceApplication.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -234,13 +236,27 @@ class UndecidableRequestIT {
 			// hold attempt nor its lapsed-reservation retirement can reach is unavailable -- silence on
 			// BOTH channels is the only answer that states nothing false about seats that were never
 			// actually evaluated.
+			//
+			// WHY these assertions filter to THIS event's own key rather than asserting the whole
+			// polled list is empty -- found necessary, not assumed: poll(...) subscribes from the
+			// beginning of a topic every call, and this class's own sibling tests
+			// (recoversWithoutReplay, dlttedAtAttemptLimit) publish to these SAME two channels. A
+			// straight isEmpty() assertion here was failing on a PREVIOUS test's own already-published,
+			// entirely unrelated message still sitting on the shared topic -- confirmed directly by
+			// printing the found record's own key and seeing it belonged to a different order entirely,
+			// not this test's own. Filtering to this event's key before asserting is what makes the
+			// assertion mean "nothing was ever produced for THIS request", the actual claim this test
+			// makes, rather than "the topic has never carried any message at all", which no test sharing
+			// a topic with siblings can honestly assert.
 			var reserved = poll(Topics.SEATS_RESERVED, Duration.ofSeconds(8),
 					collected -> collected.stream().anyMatch(r -> r.key().equals(event.orderId().toString())));
 			var rejected = poll(Topics.SEATS_REJECTED, Duration.ofSeconds(2),
 					collected -> collected.stream().anyMatch(r -> r.key().equals(event.orderId().toString())));
 
-			assertThat(reserved).as("no false grant while the store is down").isEmpty();
-			assertThat(rejected).as("no false refusal while the store is down").isEmpty();
+			assertThat(reserved).filteredOn(r -> r.key().equals(event.orderId().toString()))
+					.as("no false grant while the store is down").isEmpty();
+			assertThat(rejected).filteredOn(r -> r.key().equals(event.orderId().toString()))
+					.as("no false refusal while the store is down").isEmpty();
 		} finally {
 			unpauseRedis();
 		}
@@ -260,9 +276,15 @@ class UndecidableRequestIT {
 
 		// No manual step of any kind beyond unpausing the store: the SAME redeliveries Kafka was
 		// already scheduled to make are what decide this request once the store answers again.
+		//
+		// Filtered to this event's own key before asserting non-emptiness, for the identical reason
+		// noFalseRefusalWhileDown's own assertions are filtered: poll(...) reads this shared topic
+		// from the beginning, so an unrelated sibling test's own earlier message would make a plain
+		// isNotEmpty() check pass even if THIS request was never actually decided at all.
 		var reserved = poll(Topics.SEATS_RESERVED, Duration.ofSeconds(15),
 				collected -> collected.stream().anyMatch(r -> r.key().equals(event.orderId().toString())));
-		assertThat(reserved).as("the request is decided once the store recovers, with no replay").isNotEmpty();
+		assertThat(reserved).filteredOn(r -> r.key().equals(event.orderId().toString()))
+				.as("the request is decided once the store recovers, with no replay").isNotEmpty();
 	}
 
 	@Test
@@ -277,9 +299,13 @@ class UndecidableRequestIT {
 			// inventory.consumer.max-attempts=4 at inventory.consumer.backoff-ms=500 doubling is a few
 			// seconds of total backoff -- 20s is a generous margin, not a tight budget being trusted
 			// to just barely work.
+			// Filtered to this event's own key before asserting non-emptiness: a timed-out poll (this
+			// request never actually reaching the DLT) could otherwise still return a non-empty list
+			// thanks to an unrelated sibling test's own earlier DLT message on this same shared topic,
+			// letting a genuine failure here pass silently.
 			var dltMessages = poll(Topics.dlt(Topics.ORDER_CREATED), Duration.ofSeconds(20),
 					collected -> collected.stream().anyMatch(r -> r.key().equals(event.orderId().toString())));
-			assertThat(dltMessages)
+			assertThat(dltMessages).filteredOn(r -> r.key().equals(event.orderId().toString()))
 					.as("an undecidable message reaches the DLT within its bounded attempt limit")
 					.isNotEmpty();
 		} finally {
@@ -306,8 +332,13 @@ class UndecidableRequestIT {
 		// An unrecognised schemaVersion is classified NON-retryable (contracts/inventory-consumer.md) --
 		// it must reach the DLT immediately, well inside the multi-second window a retried failure
 		// would need, not merely eventually.
+		// Filtered to this event's own key for the identical reason every other assertion in this
+		// class now is: this topic is shared across sibling tests, so an unfiltered non-emptiness
+		// check could pass on an unrelated leftover message even if THIS message never actually
+		// reached the DLT at all.
 		var dltMessages = poll(Topics.dlt(Topics.ORDER_CREATED), Duration.ofSeconds(5),
 				collected -> collected.stream().anyMatch(r -> r.key().equals(orderId.toString())));
-		assertThat(dltMessages).as("an unrecognised schemaVersion is dead-lettered immediately").isNotEmpty();
+		assertThat(dltMessages).filteredOn(r -> r.key().equals(orderId.toString()))
+				.as("an unrecognised schemaVersion is dead-lettered immediately").isNotEmpty();
 	}
 }

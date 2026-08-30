@@ -152,6 +152,15 @@ inventory:
     # LapsedRebookingIT (T149) proves that by disabling it and rebooking anyway. Exposed as
     # a property specifically so that test can turn it off without touching code.
     enabled: true
+
+  rebuild:
+    # Always true in production and left at that default here -- exposed purely so this
+    # service's own test base classes can turn it off. SeatLockRebuilder's own Javadoc records
+    # why: every test in this service boots the full application context regardless of whether
+    # it has anything to do with Kafka, and an ungated rebuilder would start a real
+    # @KafkaListener against whatever broker that test's own context happens to resolve --
+    # the real local one, for any test that never overrides it.
+    enabled: true
     fixed-delay-ms: 30000
 
 # The outbox relay — the second in the system, ported rather than shared (R8). Same shape and

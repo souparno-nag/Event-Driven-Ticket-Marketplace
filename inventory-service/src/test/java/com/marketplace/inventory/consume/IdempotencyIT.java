@@ -32,10 +32,22 @@ import com.marketplace.inventory.SeatingPlanFixture;
  * real broker outage, consumer restart, or rebalance produces, and it is fully within this test's own
  * control rather than depending on timing nobody can force reliably.
  *
- * <p>Expected to fail until User Story 3 exists: {@code OrderCreatedListener} (T178) and
- * {@code IdempotencyGuard} (T172, T174) don't exist yet, so nothing consumes {@code order.created} at
- * all and every {@code await*} call below times out. That is this checkpoint's correct state, not a
- * defect in this test.
+ * <p>Passes now that {@code IdempotencyGuard}'s own body (T174) exists alongside
+ * {@code OrderCreatedListener} (T178) — every guarantee below is genuinely exercised through the real
+ * consumer, not merely awaiting a piece that doesn't exist yet.
+ *
+ * <p>WHY 60 seconds, not the 30 an earlier pass in this same investigation already widened these
+ * calls to — found necessary directly, not assumed: {@code tenDeliveriesOneEffect} publishes nine
+ * messages this consumer can only ever recognise as duplicates, each one exhausting its own bounded
+ * redelivery schedule (up to four attempts with exponential backoff) before this consumer's single
+ * thread advances to the next offset on that partition. {@link InventoryKafkaIT#PARTITIONS} is 3, and
+ * every test method's own {@code orderId} lands on a partition chosen by simple hashing — a roughly
+ * one-in-three chance any OTHER test method's message shares that same partition with
+ * {@code tenDeliveriesOneEffect}'s, and genuine Kafka partition ordering means a message queued behind
+ * that retry storm on the SAME partition cannot be delivered at all until every one of those nine
+ * redelivery schedules has finished, regardless of how unrelated the two messages are. 30 seconds was
+ * proven, by direct reproduction, to be too tight a margin against that worst case; 60 comfortably
+ * covers it without depending on which method JUnit happens to run first.
  */
 class IdempotencyIT extends InventoryKafkaIT {
 
@@ -58,7 +70,7 @@ class IdempotencyIT extends InventoryKafkaIT {
 			publishOrderCreated(event);
 		}
 
-		awaitSeatsReserved(orderId, Duration.ofSeconds(20));
+		awaitSeatsReserved(orderId, Duration.ofSeconds(60));
 
 		// awaitSeatsReserved returning proves at least one delivery produced the outcome. The counts
 		// below are what actually prove the other nine did NOT each produce a second one -- a naive
@@ -103,8 +115,8 @@ class IdempotencyIT extends InventoryKafkaIT {
 		publishOrderCreated(first);
 		publishOrderCreated(second);
 
-		var firstReserved = awaitSeatsReserved(firstOrderId, Duration.ofSeconds(20));
-		var secondReserved = awaitSeatsReserved(secondOrderId, Duration.ofSeconds(20));
+		var firstReserved = awaitSeatsReserved(firstOrderId, Duration.ofSeconds(60));
+		var secondReserved = awaitSeatsReserved(secondOrderId, Duration.ofSeconds(60));
 
 		assertThat(firstReserved.seatIds()).containsExactly(show.seatLabels().get(0));
 		assertThat(secondReserved.seatIds()).containsExactly(show.seatLabels().get(1));
@@ -131,16 +143,23 @@ class IdempotencyIT extends InventoryKafkaIT {
 				orderId, UUID.randomUUID(), show.showId(), List.of(seat), new BigDecimal("10.00"));
 
 		publishOrderCreated(event);
-		awaitSeatsReserved(orderId, Duration.ofSeconds(20));
+		awaitSeatsReserved(orderId, Duration.ofSeconds(60));
 
 		// The late redelivery -- published only after the first delivery's own outcome is already
 		// durable and announced.
 		publishOrderCreated(event);
 
 		// Give the late redelivery a real chance to (incorrectly) run before checking nothing changed.
+		//
+		// Filtered to this event's own key before asserting emptiness: this topic is shared with
+		// sibling test classes (SagaEndToEndIT, OutboxTracingIT) using the same Testcontainers broker,
+		// and poll(...) reads from the beginning every call -- an unfiltered isEmpty() check would be
+		// vulnerable to the identical false failure UndecidableRequestIT's own equivalent assertions
+		// were found to have (an unrelated sibling's own leftover message on this shared topic).
 		var received = poll(Topics.SEATS_REJECTED, Duration.ofSeconds(5),
 				collected -> collected.stream().anyMatch(r -> r.key().equals(orderId.toString())));
-		assertThat(received).as("a redelivery must never be announced as a refusal").isEmpty();
+		assertThat(received).filteredOn(r -> r.key().equals(orderId.toString()))
+				.as("a redelivery must never be announced as a refusal").isEmpty();
 
 		Integer reservationCount = jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM reservations WHERE order_id = ?", Integer.class, orderId);

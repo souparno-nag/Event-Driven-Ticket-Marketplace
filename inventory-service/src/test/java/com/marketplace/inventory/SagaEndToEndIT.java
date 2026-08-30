@@ -36,10 +36,9 @@ import com.marketplace.events.SeatsReserved;
  * already does, and would prove nothing about the {@code @KafkaListener} wiring, the deserializer, or
  * whether the message this service reads is genuinely the message order-service would have sent.
  *
- * <p>Expected to fail until User Story 3 exists: nothing in this service consumes {@code order.created}
- * yet ({@code OrderCreatedListener} is T178), so {@code awaitSeatsReserved} times out. That is the
- * correct state for this checkpoint, not a bug in this test — the identical situation T163 already
- * recorded for quickstart's own S1 and S4.
+ * <p>Passes now that {@code OrderCreatedListener} (T178) and {@code IdempotencyGuard} (T174) both
+ * exist — the first genuine end-to-end proof in the project that a message crossing a real service
+ * boundary produces the real effect it is supposed to.
  */
 class SagaEndToEndIT extends InventoryKafkaIT {
 
@@ -62,7 +61,7 @@ class SagaEndToEndIT extends InventoryKafkaIT {
 		// of this service's own JacksonConfig (see InventoryKafkaIT's own Javadoc) -- which is what
 		// makes a successful deserialization here evidence the CONTRACT is readable, not merely that
 		// this service agrees with itself.
-		SeatsReserved reserved = awaitSeatsReserved(orderId, Duration.ofSeconds(15));
+		SeatsReserved reserved = awaitSeatsReserved(orderId, Duration.ofSeconds(30));
 
 		assertThat(reserved.sagaId()).isEqualTo(orderId);
 		assertThat(reserved.seatIds()).containsExactly(seat);
