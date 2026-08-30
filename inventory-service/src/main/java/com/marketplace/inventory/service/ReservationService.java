@@ -3,6 +3,7 @@ package com.marketplace.inventory.service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -13,6 +14,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.marketplace.events.RejectionReason;
+import com.marketplace.inventory.consume.IdempotencyGuard;
 import com.marketplace.inventory.domain.Reservation;
 import com.marketplace.inventory.domain.ReservationRepository;
 import com.marketplace.inventory.domain.ReservationSeat;
@@ -40,10 +42,15 @@ import com.marketplace.inventory.seats.SeatLockStore;
  * {@link RejectionReason#SHOW_NOT_FOUND}, {@link RejectionReason#SEATS_NOT_FOUND}, or
  * {@link RejectionReason#SEATS_ALREADY_HELD} — via the same method rather than a second one
  * (tasks.md's own note on why these two stories are not fully independent: splitting one decision
- * across two classes would scatter one decision across two files for no benefit). The idempotency
- * guard that must run before this method is ever called in production arrives with User Story 3 —
- * every test exercising this class directly calls it exactly once per order, so no
- * redelivery-suppression is needed here yet.
+ * across two classes would scatter one decision across two files for no benefit).
+ *
+ * <p>User Story 3 adds the idempotency guard via a SEPARATE, four-argument {@link #decide(UUID, UUID,
+ * UUID, List)} overload rather than changing the original three-argument signature every User Story 1
+ * and User Story 2 test already calls directly: those tests call this class exactly once per order by
+ * construction (their whole point is exercising the decision logic itself, never redelivery), so
+ * threading a {@code messageId} through them would ask every one of those call sites to invent an
+ * identity that means nothing to what they are actually testing. {@code OrderCreatedListener} (T178),
+ * the one real caller in production, uses the four-argument form exclusively.
  */
 @Service
 public class ReservationService {
@@ -55,6 +62,7 @@ public class ReservationService {
 	private final OutboxWriter outboxWriter;
 	private final OutboxRepository outboxRepository;
 	private final DecisionMetrics decisionMetrics;
+	private final IdempotencyGuard idempotencyGuard;
 	private final TransactionTemplate transactionTemplate;
 	private final long ttlMillis;
 
@@ -66,6 +74,7 @@ public class ReservationService {
 			OutboxWriter outboxWriter,
 			OutboxRepository outboxRepository,
 			DecisionMetrics decisionMetrics,
+			IdempotencyGuard idempotencyGuard,
 			PlatformTransactionManager transactionManager,
 			@Value("${inventory.hold.ttl-ms:120000}") long ttlMillis) {
 		this.reservationRepository = reservationRepository;
@@ -75,6 +84,7 @@ public class ReservationService {
 		this.outboxWriter = outboxWriter;
 		this.outboxRepository = outboxRepository;
 		this.decisionMetrics = decisionMetrics;
+		this.idempotencyGuard = idempotencyGuard;
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
 		this.ttlMillis = ttlMillis;
 	}
@@ -116,11 +126,49 @@ public class ReservationService {
 	 * @return what was decided — never null, exactly one outcome per call (FR-022)
 	 */
 	public ReservationOutcome decide(UUID orderId, UUID showId, List<String> seatIds) {
+		// messageId is null: every caller of this three-argument form is a test exercising the
+		// decision logic directly, exactly once per order (see this class's own Javadoc) -- there is
+		// no message identity to guard against a redelivery of, because nothing here is a redelivery.
+		return decideWithRetry(null, orderId, showId, seatIds).orElseThrow(() -> new IllegalStateException(
+				"decide(orderId, showId, seatIds) must always produce an outcome when messageId is null"));
+	}
+
+	/**
+	 * The real entry point {@code OrderCreatedListener} (T178) calls in production: identical to the
+	 * three-argument {@link #decide(UUID, UUID, List)}, except the FIRST thing it does, inside the
+	 * SAME transaction as everything else, is ask {@link IdempotencyGuard#isFirstDelivery(UUID)}
+	 * whether {@code messageId} has been seen before (contracts/inventory-consumer.md step 4;
+	 * CLAUDE.md requirement 3).
+	 *
+	 * <p>WHY this guard has to run before step 1 of {@link #decideOutcome}, not merely before the Redis
+	 * hold: a redelivered message must produce NO further effect at all, including re-evaluating
+	 * whether the show or seats still exist — those checks are cheap and harmless to repeat, but
+	 * running them on a redelivery is still work this method has no reason to do twice, and keeping
+	 * the guard as the single first thing this method does keeps that fact obviously true by
+	 * inspection rather than by tracing every branch below it.
+	 *
+	 * @return the decided outcome, or {@link Optional#empty()} if {@code messageId} has already been
+	 *         processed by this consumer — in which case nothing further happened and there is
+	 *         nothing new to report (FR-030)
+	 */
+	public Optional<ReservationOutcome> decide(UUID messageId, UUID orderId, UUID showId, List<String> seatIds) {
+		return decideWithRetry(messageId, orderId, showId, seatIds);
+	}
+
+	/**
+	 * The retry-once wrapper shared by both {@link #decide} overloads, and the one place metrics are
+	 * recorded — exactly once per genuinely NEW decision, never for a redelivery {@code decideAndRecord}
+	 * recognised and skipped, which would otherwise double-count a single logical decision across two
+	 * deliveries.
+	 */
+	private Optional<ReservationOutcome> decideWithRetry(
+			UUID messageId, UUID orderId, UUID showId, List<String> seatIds) {
 		Instant decidedAt = Instant.now();
 
-		ReservationOutcome outcome;
+		Optional<ReservationOutcome> outcome;
 		try {
-			outcome = transactionTemplate.execute(status -> decideAndRecord(orderId, showId, seatIds, decidedAt));
+			outcome = transactionTemplate.execute(
+					status -> decideAndRecord(messageId, orderId, showId, seatIds, decidedAt));
 		} catch (OptimisticLockingFailureException retryOnce) {
 			// Retry exactly once, per CLAUDE.md's own optimistic-concurrency requirement -- and in a
 			// BRAND NEW transaction, not the one that just failed. Found necessary directly, not
@@ -135,29 +183,38 @@ public class ReservationService {
 			// TransactionTemplate.execute(...) is what gives the retry a genuinely fresh transaction and
 			// a genuinely fresh persistence context to load the now-current row into, rather than
 			// re-reading stale state through a session that has already seen this exact conflict once.
-			outcome = transactionTemplate.execute(status -> decideAndRecord(orderId, showId, seatIds, decidedAt));
+			outcome = transactionTemplate.execute(
+					status -> decideAndRecord(messageId, orderId, showId, seatIds, decidedAt));
 		}
 
-		if (outcome instanceof ReservationOutcome.Reserved) {
-			decisionMetrics.recordGranted();
-		} else {
-			decisionMetrics.recordRefused(((ReservationOutcome.Rejected) outcome).reason());
-		}
-		decisionMetrics.recordDecisionDuration(Duration.between(decidedAt, Instant.now()));
+		outcome.ifPresent(decided -> {
+			if (decided instanceof ReservationOutcome.Reserved) {
+				decisionMetrics.recordGranted();
+			} else {
+				decisionMetrics.recordRefused(((ReservationOutcome.Rejected) decided).reason());
+			}
+			decisionMetrics.recordDecisionDuration(Duration.between(decidedAt, Instant.now()));
+		});
 
 		return outcome;
 	}
 
 	/**
-	 * Everything {@link #decide} does inside ONE transaction: decide the outcome, then record the
-	 * outbox row announcing it. Kept separate from {@link #decide} itself so the retry-once logic
-	 * there can run this exact unit of work a second time, in a second, independent transaction, on
-	 * genuinely fresh state -- not merely re-execute a method call that happens to look the same.
+	 * Everything one delivery does inside ONE transaction: check idempotency (only when
+	 * {@code messageId} is not null), decide the outcome, then record the outbox row announcing it.
+	 * Kept separate from {@link #decideWithRetry} so the retry-once logic there can run this exact
+	 * unit of work a second time, in a second, independent transaction, on genuinely fresh state --
+	 * not merely re-execute a method call that happens to look the same.
 	 */
-	private ReservationOutcome decideAndRecord(UUID orderId, UUID showId, List<String> seatIds, Instant decidedAt) {
+	private Optional<ReservationOutcome> decideAndRecord(
+			UUID messageId, UUID orderId, UUID showId, List<String> seatIds, Instant decidedAt) {
+		if (messageId != null && !idempotencyGuard.isFirstDelivery(messageId)) {
+			return Optional.empty();
+		}
+
 		ReservationOutcome outcome = decideOutcome(orderId, showId, seatIds, decidedAt);
 		outboxRepository.save(outboxWriter.write(orderId, seatIds, outcome, decidedAt));
-		return outcome;
+		return Optional.of(outcome);
 	}
 
 	/**
