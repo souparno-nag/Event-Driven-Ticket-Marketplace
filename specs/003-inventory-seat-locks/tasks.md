@@ -192,7 +192,7 @@ reservation and the set of announcements are each identical to what a single del
 - [X] T178 [US3] Create `inventory-service/src/main/java/com/marketplace/inventory/consume/OrderCreatedListener.java` — `@KafkaListener` on `Topics.ORDER_CREATED` that checks the schema version, then hands the message to `ReservationService`. WHY comment recording that `@Transactional` belongs on the service method rather than here, so the error handler's own bookkeeping stays outside the transaction (contracts/inventory-consumer.md)
 - [X] T179 [US3] Create `inventory-service/src/main/java/com/marketplace/inventory/startup/SeatLockRebuilder.java` — an `ApplicationRunner` that replays held, unlapsed reservations into Redis with `SET … PXAT` and only then calls `KafkaListenerEndpointRegistry#start()`. WHY comment: `PXAT` sets an absolute expiry, so a restart cannot silently extend a hold past what was announced; and consuming before the replay completes is precisely a double-booking, by a service that looks perfectly healthy while doing it (FR-015, FR-016, R4)
 - [X] T180 [P] [US3] Add `inventory.messages.deadlettered` to `DecisionMetrics`, incremented by the dead-letter recoverer, so a service failing to decide anything is distinguishable from a service receiving nothing (FR-050, R13)
-- [ ] T181 [US3] Run quickstart scenarios S5, S6 and S7 and record the results (SC-006, SC-007, SC-013, SC-014, SC-018, SC-019)
+- [X] T181 [US3] Run quickstart scenarios S5, S6 and S7 and record the results (SC-006, SC-007, SC-013, SC-014, SC-018, SC-019)
 
 **Checkpoint**: the saga runs end to end from `POST /api/orders` to `seats.reserved`. Step 4 is unblocked.
 
